@@ -1,3 +1,5 @@
+use std::io;
+
 use nom::{
     Finish, IResult, Parser,
     branch::alt,
@@ -78,10 +80,11 @@ enum Builtin {
     Swap,
 }
 
-fn parse_source<'a>(ctx: Context, input: &'a str) -> Result<Ast, ()> {
+fn parse_source<'a>(ctx: &mut Context, input: &'a str) -> Result<Ast, ()> {
     match program::<VerboseError<&str>>(input).finish() {
         Ok((_, ast)) => {
-            ctx.emit_debug("Parsed successfully");
+            ctx.emit_debug("parsed");
+            ctx.emit_debug(format!("parser result: {:#?}", ast));
             Ok(ast)
         }
         Err(error) => {
