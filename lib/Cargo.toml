@@ -5,4 +5,4 @@ edition = "2024"
 
 [dependencies]
 nom = "7"
-thiserror = "2.0.18"
+thiserror = "2"

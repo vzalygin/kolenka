@@ -1,6 +1,7 @@
 mod context;
 mod error;
-mod frontend;
+mod parser;
+mod pass;
 
 #[cfg(test)]
 mod tests {

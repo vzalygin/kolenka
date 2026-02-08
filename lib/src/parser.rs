@@ -1,12 +1,10 @@
-use std::io;
-
 use nom::{
     Finish, IResult, Parser,
     branch::alt,
     bytes::complete::{tag, take_while, take_while1},
     character::{is_alphanumeric, is_digit},
     combinator::{all_consuming, map},
-    error::{ParseError, VerboseError, context, convert_error},
+    error::{ParseError, VerboseError, convert_error},
     multi::{many0, many1, separated_list0},
     sequence::{delimited, pair, preceded},
 };
@@ -43,28 +41,30 @@ use crate::{context::Context, error::CompilerError};
 /// <Program>       ::= { <Define> | <Extern> | <Term> } ;
 
 #[derive(Debug, Clone)]
-struct Ast {
-    program: Vec<AstNode>,
+pub(crate) struct Ast {
+    pub(crate) program: Program,
 }
 
+pub(crate) type Program = Vec<AstNode>;
+
 #[derive(Debug, Clone)]
-enum AstNode {
+pub(crate) enum AstNode {
     // types
-    Num { value: i32 },
+    Int { value: i32 },
     Bool { value: bool },
 
     // prog
     BuiltinIdentifier { value: Builtin },
     Identifier { value: String },
-    Quote { value: Vec<AstNode> },
-    Define { id: String, value: Vec<AstNode> },
+    Quote { value: Program },
+    Define { id: String, value: Program },
     // types ?
 }
 
 #[derive(Debug, Clone)]
-enum Builtin {
+pub(crate) enum Builtin {
     // control
-    Eval,
+    Apply,
     If,
 
     // math ops
@@ -76,11 +76,10 @@ enum Builtin {
     // stack ops
     Pop,
     Dup,
-    Dip,
     Swap,
 }
 
-fn parse_source<'a>(ctx: &mut Context, input: &'a str) -> Result<Ast, ()> {
+pub(crate) fn parse_source(ctx: &mut Context, input: &str) -> Result<Ast, ()> {
     match program::<VerboseError<&str>>(input).finish() {
         Ok((_, ast)) => {
             ctx.emit_debug("parsed");
@@ -148,7 +147,7 @@ fn string<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, String
 fn num<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, AstNode, E> {
     map(take_while1(|c: char| is_digit(c as u8)), |number: &str| {
         let number = number.parse::<i32>().unwrap();
-        AstNode::Num { value: number }
+        AstNode::Int { value: number }
     })(input)
 }
 
@@ -162,7 +161,7 @@ fn bool<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, AstNode,
 fn builtin<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, AstNode, E> {
     map(
         alt((
-            map(tag("eval"), |_| Builtin::Eval),
+            map(tag("apply"), |_| Builtin::Apply),
             map(tag("if"), |_| Builtin::If),
             map(tag("add"), |_| Builtin::Add),
             map(tag("sub"), |_| Builtin::Sub),
@@ -170,7 +169,6 @@ fn builtin<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, AstNo
             map(tag("div"), |_| Builtin::Div),
             map(tag("pop"), |_| Builtin::Pop),
             map(tag("dup"), |_| Builtin::Dup),
-            map(tag("dip"), |_| Builtin::Dip),
             map(tag("swap"), |_| Builtin::Swap),
         )),
         |builtin| AstNode::BuiltinIdentifier { value: builtin },

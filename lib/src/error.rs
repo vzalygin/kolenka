@@ -1,7 +1,7 @@
 use thiserror::Error;
 
 #[derive(Error, Debug)]
-pub enum CompilerError {
+pub(crate) enum CompilerError {
     #[error("Syntax error: {description:?}")]
     ParserError { description: String },
 }
