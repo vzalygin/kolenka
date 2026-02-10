@@ -17,6 +17,12 @@ impl Type {
             out: out.into(),
         }
     }
+
+    /// Тип тривиальной программы -- программы, которая ничего не делает
+    pub(crate) fn trivial() -> Type {
+        let stack = Term::stack();
+        Type::new([stack.clone()], [stack])
+    }
 }
 
 pub(crate) type StackCfg = Vec<Term>;

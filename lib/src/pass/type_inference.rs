@@ -13,6 +13,33 @@ enum TypeError {
     Error,
 }
 
+/// Представление ограничения
+///
+/// Вывод типов неизменно связан согласованием конфигураций стека между командами. Данный тип описывает такие требования согласования.
+enum Restriction {
+    /// Требование унификации типов
+    Unification(Term, Term),
+    /// Требование согласования размеров стека 
+    StackExtension(StackCfg, StackCfg),
+}
+
+impl Restriction {
+    fn apply_replacement(self, replacement: &Replacement) -> Restriction {
+        todo!()
+    }
+}
+
+impl Type {
+    fn apply_replacement(self, replacement: &Replacement) -> Type {
+        todo!()
+    }
+}
+ 
+struct Replacement {
+    from: Vec<StackCfg>,
+    to: StackCfg,
+}
+
 /// Вывод типа для всей программы
 fn infer_ast(ast: &Ast) -> Result<Type, TypeError> {
     infer(&ast.program)
@@ -20,7 +47,7 @@ fn infer_ast(ast: &Ast) -> Result<Type, TypeError> {
 
 /// Вывод типа для последовательности команд
 fn infer(nodes: &Vec<AstNode>) -> Result<Type, TypeError> {
-    let mut prog_type = Type::new([], []);
+    let mut prog_type = Type::trivial();
 
     for node in nodes {
         let node_type = get_node_type(node)?;
@@ -124,33 +151,74 @@ fn get_node_type(node: &AstNode) -> Result<Type, TypeError> {
 /// Сопоставление конфигураций -- попарное сопоставление переменных на верхушках стеков конфигураций. Сопоставление для цитат -- сопоставление их входных и выходных конфигураций.
 /// В процессе сопоставления генерируются ограничения, для которых затем ищется наиболее общее решение -- унификация. Если решение не существует, то имеет место ошибка типизации.
 fn chain(lhs: &Type, rhs: &Type) -> Result<Type, TypeError> {
-    let compose_restriction_pair = (&lhs.out, &rhs.inp);
+    let (mut lhs, mut rhs) = (lhs.clone(), rhs.clone());
 
-    todo!()
+    let restrictions = find_restrictions(&lhs, &rhs);
+    let replacements = unification(restrictions)?;
+    
+    for replacement in replacements {
+        lhs = lhs.apply_replacement(&replacement);
+        rhs = rhs.apply_replacement(&replacement);
+    }
+
+    Ok(Type::new(lhs.inp, rhs.out))
 }
 
-/// Представление ограничения
+fn find_restrictions(lhs: &Type, rhs: &Type) -> Vec<Restriction> {
+    let mut lhs_iter = lhs.out.iter().rev().into_iter().peekable();
+    let mut rhs_iter = rhs.inp.iter().rev().into_iter().peekable();
+    let mut restrictions: Vec<Restriction> = vec![];
+
+    // TODO рекурсия
+    while lhs_iter.peek().is_some() || rhs_iter.peek().is_some() {
+        let lhs = lhs_iter.next().unwrap();
+        let lhs_has_next = lhs_iter.peek().is_some();
+
+        let rhs = rhs_iter.next().unwrap();
+        let rhs_has_next = rhs_iter.peek().is_some();
+
+        if lhs_has_next && rhs_has_next {
+            restrictions.push(Restriction::Unification(lhs.clone(), rhs.clone()));            
+        } else if !rhs_has_next {
+            let lhs: Vec<Term> = lhs_iter.map(|term| term.clone()).collect();
+            let rhs: Vec<Term> = vec![rhs.clone()];
+            restrictions.push(Restriction::StackExtension(lhs, rhs));
+            break;
+        } else if !lhs_has_next {
+            let lhs: Vec<Term> = vec![lhs.clone()];
+            let rhs: Vec<Term> = rhs_iter.map(|term| term.clone()).collect();
+            restrictions.push(Restriction::StackExtension(lhs, rhs));
+            break;
+        }
+    }
+
+    restrictions
+}
+
+fn unification(restrictions: Vec<Restriction>) -> Result<Vec<Replacement>, TypeError> {
+    let mut restrictions: Vec<Restriction> = restrictions;
+    let replacements: Vec<Replacement> = vec![];
+
+    while restrictions.len() != 0 {
+        let restriction = restrictions.pop().unwrap();
+        let replacement = solve(&restriction)?;
+
+        restrictions = restrictions.into_iter()
+            .map(|r| r.apply_replacement(&replacement))
+            .collect();
+    }
+
+    Ok(replacements)
+}
+
+/// Поиск подстановки. Подстановка -- сведение двух конфигураций в один согласно правилам:
 ///
-/// Ограничение -- два кусочка конфигураций, для которых необходимо подобрать общую подстановку.
-struct Restriction {
-    lhs: StackCfg,
-    rhs: StackCfg,
-}
-
-impl Restriction {
-    fn new(lhs: StackCfg, rhs: StackCfg) -> Restriction {
-        Restriction { lhs, rhs }
-    }
-
-    /// Поиск подстановки. Подстановка -- сведение двух конфигураций в один согласно правилам:
-    ///
-    /// 1. Если два типа, то выбирается наиболее общий (пример, Int и Var -> Int)
-    /// 2. Если конфигурации разного размера, то выбирается наиболее длинная. По сути -- сводится к п.1, если считать, что наиболее общий == наиболее длинный.
-    ///
-    /// Если подобрать наиболее общий тип нельзя (например, пустота и Int или Quote и Bool), то возникает ошибка типизации. TODO уточнить различные ошибки
-    ///
-    /// После получения подстановки -- она применяется путем замены во всех ограничениях. TODO важен ли порядок?
-    fn solve(&self) -> Result<StackCfg, TypeError> {
-        todo!()
-    }
+/// 1. Если два типа, то выбирается наиболее общий (пример, Int и Var -> Int)
+/// 2. Если конфигурации разного размера, то выбирается наиболее длинная. По сути -- сводится к п.1, если считать, что наиболее общий == наиболее длинный.
+///
+/// Если подобрать наиболее общий тип нельзя (например, пустота и Int или Quote и Bool), то возникает ошибка типизации. TODO уточнить различные ошибки
+///
+/// После получения подстановки -- она применяется путем замены во всех ограничениях.
+fn solve(restriction: &Restriction) -> Result<Replacement, TypeError> {
+    todo!()
 }
