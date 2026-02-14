@@ -4,7 +4,7 @@ use std::sync::atomic::{AtomicI64, Ordering};
 
 static GLOBAL_ID: AtomicI64 = AtomicI64::new(0);
 
-#[derive(PartialEq, Eq, Clone)]
+#[derive(PartialEq, Eq, Clone, Debug)]
 pub(crate) struct Type {
     pub(crate) inp: StackCfg,
     pub(crate) out: StackCfg,
@@ -27,7 +27,7 @@ impl Type {
 
 pub(crate) type StackCfg = Vec<Term>;
 
-#[derive(PartialEq, Eq, Clone)]
+#[derive(PartialEq, Eq, Clone, Debug)]
 pub(crate) enum Term {
     Stack(Id), // Стек и переменная могут обозначать разные по сути типы,
     Var(Id),   // поэтому надо различать их при помощи идентификаторов
@@ -60,8 +60,8 @@ impl Term {
     }
 }
 
-#[derive(PartialEq, Eq, Clone)]
-struct Id(i64);
+#[derive(PartialEq, Eq, Clone, Debug)]
+pub(crate) struct Id(i64);
 
 impl Id {
     fn new() -> Id {
