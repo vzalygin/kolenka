@@ -3,6 +3,13 @@ mod error;
 mod parser;
 mod pass;
 
+pub use crate::{
+    context::Context,
+    error::CompilerError,
+    parser::{Ast, parse_source},
+    pass::{Type, infer_ast},
+};
+
 #[cfg(test)]
 mod tests {
     #[test]

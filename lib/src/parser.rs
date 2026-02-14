@@ -41,7 +41,7 @@ use crate::{context::Context, error::CompilerError};
 /// <Program>       ::= { <Define> | <Extern> | <Term> } ;
 
 #[derive(Debug, Clone)]
-pub(crate) struct Ast {
+pub struct Ast {
     pub(crate) program: Program,
 }
 
@@ -79,18 +79,20 @@ pub(crate) enum Builtin {
     Swap,
 }
 
-pub(crate) fn parse_source(ctx: &mut Context, input: &str) -> Result<Ast, ()> {
+pub fn parse_source(input: &str) -> Result<Ast, CompilerError> {
     match program::<VerboseError<&str>>(input).finish() {
         Ok((_, ast)) => {
-            ctx.emit_debug("parsed");
-            ctx.emit_debug(format!("parser result: {:#?}", ast));
+            // ctx.emit_debug("parsed");
+            // ctx.emit_debug(format!("parser result: {:#?}", ast));
             Ok(ast)
         }
-        Err(error) => {
-            ctx.emit_err(CompilerError::ParserError {
-                description: convert_error(input, error),
-            });
-            Err(())
+        Err(e) => {
+            // ctx.emit_err(CompilerError::ParserError {
+            //     description: convert_error(input, error),
+            // });
+            Err(CompilerError::ParserError {
+                description: convert_error(input, e),
+            })
         }
     }
 }

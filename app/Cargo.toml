@@ -1,5 +1,5 @@
 [package]
-name = "lib"
+name = "kolenka"
 version = "0.1.0"
 edition = "2024"
 authors = [
@@ -7,5 +7,6 @@ authors = [
 ]
 
 [dependencies]
-nom = "7"
-thiserror = "2"
+lib = { path = "../lib" }
+
+colored = "3"

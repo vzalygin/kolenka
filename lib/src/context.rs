@@ -2,11 +2,15 @@ use std::io;
 
 use crate::error::CompilerError;
 
-pub(crate) struct Context {
-    output: dyn io::Write,
+pub struct Context {
+    output: Box<dyn io::Write>,
 }
 
 impl Context {
+    pub fn new(output: Box<dyn io::Write>) -> Context {
+        Context { output }
+    }
+
     pub(crate) fn emit_err(&mut self, err: CompilerError) {
         let _ = writeln!(self.output, "ERR {}", err);
     }
