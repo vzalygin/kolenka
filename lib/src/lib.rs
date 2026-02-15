@@ -4,7 +4,7 @@ mod parser;
 mod pass;
 
 pub use crate::{
-    context::Context,
+    context::{Context, LogLevel},
     error::CompilerError,
     parser::{Ast, parse_source},
     pass::{Type, infer_ast},

@@ -79,20 +79,18 @@ pub(crate) enum Builtin {
     Swap,
 }
 
-pub fn parse_source(input: &str) -> Result<Ast, CompilerError> {
+pub fn parse_source(input: &str, ctx: &mut Context) -> Result<Ast, CompilerError> {
     match program::<VerboseError<&str>>(input).finish() {
         Ok((_, ast)) => {
-            // ctx.emit_debug("parsed");
-            // ctx.emit_debug(format!("parser result: {:#?}", ast));
+            ctx.emit_debug(format!("parsed {:?}", ast));
             Ok(ast)
         }
         Err(e) => {
-            // ctx.emit_err(CompilerError::ParserError {
-            //     description: convert_error(input, error),
-            // });
-            Err(CompilerError::ParserError {
+            let e = CompilerError::ParserError {
                 description: convert_error(input, e),
-            })
+            };
+            ctx.emit_err(&e);
+            Err(e)
         }
     }
 }

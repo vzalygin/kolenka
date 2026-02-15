@@ -3,14 +3,12 @@
 use thiserror::Error;
 
 use crate::{
-    CompilerError,
-    parser::{Ast, AstNode, Builtin},
-    pass::typing::{StackCfg, Term, Type},
+    CompilerError, Context, parser::{Ast, AstNode, Builtin}, pass::typing::{StackCfg, Term, Type}
 };
 
 #[derive(Error, Debug)]
 pub enum TypingError {
-    #[error("Incompatible types {0:?} and {1:?}")]
+    #[error("Incompatible types {0} and {1}")]
     IncompatibleTypes(Term, Term),
 }
 
@@ -73,26 +71,25 @@ fn stack_cfg_apply_replacement(old: StackCfg, replacement: &Replacement) -> Stac
             }
 
             new
-        },
+        }
         Replacement::Identity => old,
     }
-
 }
 
 /// Вывод типа для всей программы
-pub fn infer_ast(ast: &Ast) -> Result<Type, CompilerError> {
-    infer(&ast.program).map_err(|e| CompilerError::TypingError(e))
+pub fn infer_ast(ast: &Ast, ctx: &mut Context) -> Result<Type, CompilerError> {
+    infer(&ast.program, ctx).map_err(|e| CompilerError::TypingError(e))
 }
 
 /// Вывод типа для последовательности команд
-fn infer(nodes: &Vec<AstNode>) -> Result<Type, TypingError> {
+fn infer(nodes: &Vec<AstNode>, ctx: &mut Context) -> Result<Type, TypingError> {
     let mut prog_type = Type::trivial();
 
     for node in nodes {
-        let node_type = get_node_type(node)?;
-        // println!("chaining {:?} node type: {}", node, node_type);
-        prog_type = chain(&prog_type, &node_type)?;
-        // println!("chained type {}", prog_type);
+        let node_type = get_node_type(node, ctx)?;
+        ctx.emit_debug(format!("chaining {:?} node type: {}", node, node_type));
+        prog_type = chain(&prog_type, &node_type, ctx)?;
+        ctx.emit_debug(format!("chained type {}", prog_type));
     }
 
     Ok(prog_type)
@@ -107,10 +104,10 @@ fn infer(nodes: &Vec<AstNode>) -> Result<Type, TypingError> {
 /// dup     : ('a 'S -> 'a 'a 'S)
 /// pop     : ('a 'S -> 'S)
 /// swap    : ('a 'b 'S -> 'b 'a 'S)
-/// cond    : (Bool 'a 'a 'S -> 'a 'S)
+/// cond    : ('a 'a Bool 'S -> 'a 'S)
 /// while   : (('S -> Bool 'R) ('R -> 'S) 'S -> 'S)
 /// ```
-fn get_node_type(node: &AstNode) -> Result<Type, TypingError> {
+fn get_node_type(node: &AstNode, ctx: &mut Context) -> Result<Type, TypingError> {
     match node {
         AstNode::BuiltinIdentifier { value } => match value {
             Builtin::Eval => {
@@ -124,7 +121,7 @@ fn get_node_type(node: &AstNode) -> Result<Type, TypingError> {
                 let var = Term::var();
                 let bool = Term::bool();
                 Ok(Type::new(
-                    [tail.clone(), var.clone(), var.clone(), bool],
+                    [tail.clone(), bool, var.clone(), var.clone()],
                     [tail, var.clone()],
                 ))
             }
@@ -179,7 +176,7 @@ fn get_node_type(node: &AstNode) -> Result<Type, TypingError> {
         }
         AstNode::Quote { value } => {
             let tail = Term::tail();
-            let quote = Term::quote(infer(value)?);
+            let quote = Term::quote(infer(value, ctx)?);
 
             Ok(Type::new([tail.clone()], [tail, quote])) // T-QUOTE rule
         }
@@ -191,48 +188,48 @@ fn get_node_type(node: &AstNode) -> Result<Type, TypingError> {
 /// Выходная конфигурация `lhs` должна быть сопоставлена с входной конфигурацией `rhs` (T-COMPOSE rule).
 /// Сопоставление конфигураций -- попарное сопоставление переменных на верхушках стеков конфигураций. Сопоставление для цитат -- сопоставление их входных и выходных конфигураций.
 /// В процессе сопоставления генерируются ограничения, для которых затем ищется наиболее общее решение -- унификация. Если решение не существует, то имеет место ошибка типизации.
-fn chain(lhs: &Type, rhs: &Type) -> Result<Type, TypingError> {
+fn chain(lhs: &Type, rhs: &Type, ctx: &mut Context) -> Result<Type, TypingError> {
     let (mut lhs, mut rhs) = (lhs.clone(), rhs.clone());
 
-    let mut restrictions = constrain_chain(&lhs, &rhs);
+    let mut restrictions = constrain_chain(&lhs, &rhs, ctx);
 
     while restrictions.len() != 0 {
-        // println!("\ttypes lhs {} rhs {}", lhs, rhs);
-        // println!("\trestrictions {:?}", restrictions);
+        ctx.emit_debug(format!("\ttypes lhs {} rhs {}", lhs, rhs));
+        ctx.emit_debug(format!("\trestrictions {:?}", restrictions));
         for restriction in restrictions {
-            let replacement = chain_solve(restriction)?;
-            // println!("\t\treplacement {:?}", replacement);
+            let replacement = chain_solve(restriction, ctx)?;
+            ctx.emit_debug(format!("\t\treplacement {:?}", replacement));
             lhs = lhs.apply_replacement(&replacement);
             rhs = rhs.apply_replacement(&replacement);
         }
-        // println!("\tapplied types lhs {} rhs {}", lhs, rhs);
-        restrictions = constrain_chain(&lhs, &rhs);
+        ctx.emit_debug(format!("\tapplied types lhs {} rhs {}", lhs, rhs));
+        restrictions = constrain_chain(&lhs, &rhs, ctx);
     }
 
     Ok(Type::new(lhs.inp, rhs.out))
 }
 
 /// Поиск ограничений сцепки
-/// 
+///
 /// Сцепка -- выход первого типа должен совпадать с входом второй типа.
-fn constrain_chain(lhs: &Type, rhs: &Type) -> Vec<Constraint> {
-    constrain(&lhs.out, &rhs.inp)
+fn constrain_chain(lhs: &Type, rhs: &Type, ctx: &mut Context) -> Vec<Constraint> {
+    constrain(&lhs.out, &rhs.inp, ctx)
 }
 
 /// Поиск ограничений эквивалентности
-/// 
+///
 /// Эквивалетность типов -- вход и выход первого типа совпадают с входом и выходом второго типа.
-fn constrain_equivalence(lhs: &Type, rhs: &Type) -> Vec<Constraint> {
+fn constrain_equivalence(lhs: &Type, rhs: &Type, ctx: &mut Context) -> Vec<Constraint> {
     let mut constraints: Vec<Constraint> = vec![];
 
-    constraints.append(&mut constrain(&lhs.inp, &rhs.inp));
-    constraints.append(&mut constrain(&lhs.out, &rhs.out));
+    constraints.append(&mut constrain(&lhs.inp, &rhs.inp, ctx));
+    constraints.append(&mut constrain(&lhs.out, &rhs.out, ctx));
 
     constraints
 }
 
 /// Поиск ограничений для двух стековых конфигураций
-fn constrain(lhs: &StackCfg, rhs: &StackCfg) -> Vec<Constraint> {
+fn constrain(lhs: &StackCfg, rhs: &StackCfg, ctx: &mut Context) -> Vec<Constraint> {
     let mut lhs_iter = lhs.iter().rev().into_iter().peekable();
     let mut rhs_iter = rhs.iter().rev().into_iter().peekable();
     let mut constraints: Vec<Constraint> = vec![];
@@ -245,8 +242,10 @@ fn constrain(lhs: &StackCfg, rhs: &StackCfg) -> Vec<Constraint> {
 
         if lhs_has_next == rhs_has_next {
             if lhs != rhs {
-                if let Term::Quote { inner: lhs } = lhs && let Term::Quote { inner: rhs } = rhs {
-                    constraints.append(&mut constrain_equivalence(lhs, rhs));
+                if let Term::Quote { inner: lhs } = lhs
+                    && let Term::Quote { inner: rhs } = rhs
+                {
+                    constraints.append(&mut constrain_equivalence(lhs, rhs, ctx));
                 } else {
                     constraints.push(Constraint::Unification(lhs.clone(), rhs.clone()));
                 }
@@ -279,14 +278,14 @@ fn constrain(lhs: &StackCfg, rhs: &StackCfg) -> Vec<Constraint> {
 ///
 /// 1. Если два типа, то выбирается наиболее конкретный (пример, Int и Var -> Int)
 /// 2. Если конфигурации разного размера, то выбирается наиболее длинная. По сути -- сводится к п.1, если считать, что наиболее общий == наиболее длинный.
-fn chain_solve(restriction: Constraint) -> Result<Replacement, TypingError> {
-    // println!("\t\tunification for {:?}", restriction);
+fn chain_solve(restriction: Constraint, ctx: &mut Context) -> Result<Replacement, TypingError> {
+    ctx.emit_debug(format!("\t\tunification for {:?}", restriction));
     match restriction {
         Constraint::Unification(lhs, rhs) => {
             // Пока правила достаточно простые, reduce всегда возвращает `Ok(to)`, если сведение возможно
             let r_lhs = chain_reduce(&lhs, &rhs).is_some();
             let r_rhs = chain_reduce(&rhs, &lhs).is_some();
-            // println!("\t\treduce_lhs {} reduce_rhs {}", r_lhs, r_rhs);
+            ctx.emit_debug(format!("\t\treduce_lhs {} reduce_rhs {}", r_lhs, r_rhs));
             // Приоритетно менять правую часть, чтобы не возникло циклов
             // Но вообще надо бы подумать, действительно ли никак не решить цикл без этого странного необходимого порядка
             if r_rhs {

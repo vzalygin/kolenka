@@ -4,8 +4,8 @@ use crate::pass::TypingError;
 
 #[derive(Error, Debug)]
 pub enum CompilerError {
-    #[error("Syntax error: {description:?}")]
+    #[error("syntax error: {description}")]
     ParserError { description: String },
-    #[error("Typing error: {0:?}")]
+    #[error("typing error: {0}")]
     TypingError(TypingError),
 }

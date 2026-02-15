@@ -1,7 +1,7 @@
 use colored::Colorize;
 use std::io::{self, Write};
 
-use lib::{CompilerError, infer_ast, parse_source};
+use lib::{CompilerError, Context, LogLevel, infer_ast, parse_source};
 
 fn main() {
     loop {
@@ -18,11 +18,12 @@ fn main() {
 }
 
 fn compile(source: String) -> Result<(), CompilerError> {
-    let ast = parse_source(&source)?;
-    println!("{:?}", ast);
+    let mut parser_context = Context::new(std::io::stdout(), LogLevel::Debug);
+    let mut typing_context = Context::new(std::io::stdout(), LogLevel::Debug);
 
-    let prog_type = infer_ast(&ast)?;
-    println!("Type: {}", prog_type);
+    let ast = parse_source(&source, &mut parser_context)?;
+
+    let prog_type = infer_ast(&ast, &mut typing_context)?;
 
     Ok(())
 }

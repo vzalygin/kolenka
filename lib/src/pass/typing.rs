@@ -53,8 +53,8 @@ impl Type {
                     inner.fmt_inner(f, term_names, stack_names_it, var_names_it)?;
                     write!(f, ")")?;
                 }
-                Term::Int => write!(f, "'i")?,
-                Term::Bool => write!(f, "'b")?,
+                Term::Int => write!(f, "Int")?,
+                Term::Bool => write!(f, "Bool")?,
             }
             if i != stack_cfg.len() - 1 {
                 write!(f, " ")?;
@@ -140,6 +140,24 @@ impl Term {
 
     pub(crate) fn bool() -> Term {
         Term::Bool
+    }
+}
+
+impl std::fmt::Display for Term {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Term::Tail(_) => write!(f, "Tail")?,
+            Term::Var(_) => write!(f, "Var")?,
+            Term::Quote { inner } => {
+                write!(f, "(")?;
+                inner.fmt(f)?;
+                write!(f, ")")?;
+            },
+            Term::Int => write!(f, "Int")?,
+            Term::Bool => write!(f, "Bool")?,
+        }
+
+        Ok(())
     }
 }
 
