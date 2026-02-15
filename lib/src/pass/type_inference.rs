@@ -18,11 +18,11 @@ pub enum TypingError {
 ///
 /// Вывод типов связан согласованием конфигураций стека между командами. Данный тип описывает такие требования согласования.
 #[derive(Debug)]
-enum Restriction {
+enum Constraint {
     /// Требование унификации типов
     Unification(Term, Term),
     /// Требование согласования размеров стека
-    StackExtension(StackCfg, StackCfg),
+    TailExtension(StackCfg, StackCfg),
 }
 
 #[derive(Debug)]
@@ -43,32 +43,40 @@ impl Replacement {
 
 impl Type {
     fn apply_replacement(self, replacement: &Replacement) -> Type {
-        match replacement {
-            Replacement::Stack(from, to) => Type::new(
-                stack_cfg_apply_replacement(self.inp, from, to),
-                stack_cfg_apply_replacement(self.out, from, to),
-            ),
-            Replacement::Identity => self,
-        }
+        Type::new(
+            stack_cfg_apply_replacement(self.inp, replacement),
+            stack_cfg_apply_replacement(self.out, replacement),
+        )
     }
 }
 
-fn stack_cfg_apply_replacement(old: StackCfg, from: &Vec<Term>, to: &Vec<Term>) -> StackCfg {
-    let mut new: StackCfg = vec![];
-    let mut i = 0;
+fn stack_cfg_apply_replacement(old: StackCfg, replacement: &Replacement) -> StackCfg {
+    match replacement {
+        Replacement::Stack(from, to) => {
+            let mut new: StackCfg = vec![];
+            let mut i = 0;
 
-    while i < old.len() {
-        if old[i..].starts_with(from) {
-            let mut to = to.clone();
-            new.append(&mut to);
-            i += from.len();
-        } else {
-            new.push(old[i].clone());
-            i += 1;
-        }
+            while i < old.len() {
+                if old[i..].starts_with(from) {
+                    let mut to = to.clone();
+                    new.append(&mut to);
+                    i += from.len();
+                } else {
+                    let old = old[i].clone();
+                    if let Term::Quote { inner } = old {
+                        new.push(Term::quote(inner.apply_replacement(replacement)));
+                    } else {
+                        new.push(old);
+                    }
+                    i += 1;
+                }
+            }
+
+            new
+        },
+        Replacement::Identity => old,
     }
 
-    new
 }
 
 /// Вывод типа для всей программы
@@ -82,8 +90,9 @@ fn infer(nodes: &Vec<AstNode>) -> Result<Type, TypingError> {
 
     for node in nodes {
         let node_type = get_node_type(node)?;
-        // println!("node type: {}", node_type);
+        // println!("chaining {:?} node type: {}", node, node_type);
         prog_type = chain(&prog_type, &node_type)?;
+        // println!("chained type {}", prog_type);
     }
 
     Ok(prog_type)
@@ -92,7 +101,7 @@ fn infer(nodes: &Vec<AstNode>) -> Result<Type, TypingError> {
 /// Типы для встроенных конструкций
 ///
 /// ```text
-/// apply   : (('S -> 'R) 'S -> 'R)
+/// eval    : (('S -> 'R) 'S -> 'R)
 /// quote   : ('a 'S -> ('R -> 'a 'R) 'S)
 /// compose : (('B -> 'C) ('A -> 'B) 'S -> ('A -> 'C) 'S)
 /// dup     : ('a 'S -> 'a 'a 'S)
@@ -104,14 +113,14 @@ fn infer(nodes: &Vec<AstNode>) -> Result<Type, TypingError> {
 fn get_node_type(node: &AstNode) -> Result<Type, TypingError> {
     match node {
         AstNode::BuiltinIdentifier { value } => match value {
-            Builtin::Apply => {
-                let tail = Term::stack();
-                let new_tail = Term::stack();
+            Builtin::Eval => {
+                let tail = Term::tail();
+                let new_tail = Term::tail();
                 let quote = Term::quote(Type::new([tail.clone()], [new_tail.clone()]));
                 Ok(Type::new([tail, quote], [new_tail]))
             }
             Builtin::If => {
-                let tail = Term::stack();
+                let tail = Term::tail();
                 let var = Term::var();
                 let bool = Term::bool();
                 Ok(Type::new(
@@ -120,7 +129,7 @@ fn get_node_type(node: &AstNode) -> Result<Type, TypingError> {
                 ))
             }
             Builtin::Add | Builtin::Sub | Builtin::Mul | Builtin::Div => {
-                let tail = Term::stack();
+                let tail = Term::tail();
                 let int = Term::bool();
                 Ok(Type::new(
                     [tail.clone(), int.clone(), int.clone()],
@@ -128,12 +137,12 @@ fn get_node_type(node: &AstNode) -> Result<Type, TypingError> {
                 ))
             }
             Builtin::Pop => {
-                let tail = Term::stack();
+                let tail = Term::tail();
                 let var = Term::var();
                 Ok(Type::new([tail.clone(), var.clone()], [tail.clone()]))
             }
             Builtin::Dup => {
-                let tail = Term::stack();
+                let tail = Term::tail();
                 let var = Term::var();
                 Ok(Type::new(
                     [tail.clone(), var.clone()],
@@ -141,7 +150,7 @@ fn get_node_type(node: &AstNode) -> Result<Type, TypingError> {
                 ))
             }
             Builtin::Swap => {
-                let tail = Term::stack();
+                let tail = Term::tail();
                 let lhs = Term::var();
                 let rhs = Term::var();
                 Ok(Type::new(
@@ -151,17 +160,17 @@ fn get_node_type(node: &AstNode) -> Result<Type, TypingError> {
             }
         },
         AstNode::Define { id: _, value: _ } => {
-            let tail = Term::stack();
+            let tail = Term::tail();
             Ok(Type::new([tail.clone()], [tail]))
         }
         AstNode::Int { value: _ } => {
-            let tail = Term::stack();
+            let tail = Term::tail();
             let int = Term::int();
             Ok(Type::new([tail.clone()], [tail, int]))
         }
         AstNode::Bool { value: _ } => {
             // TODO можно упростить с Int
-            let tail = Term::stack();
+            let tail = Term::tail();
             let bool = Term::bool();
             Ok(Type::new([tail.clone()], [tail, bool]))
         }
@@ -169,7 +178,7 @@ fn get_node_type(node: &AstNode) -> Result<Type, TypingError> {
             todo!("Тип идентификатора зависит от того, что под этим идентификатором определено")
         }
         AstNode::Quote { value } => {
-            let tail = Term::stack();
+            let tail = Term::tail();
             let quote = Term::quote(infer(value)?);
 
             Ok(Type::new([tail.clone()], [tail, quote])) // T-QUOTE rule
@@ -185,43 +194,62 @@ fn get_node_type(node: &AstNode) -> Result<Type, TypingError> {
 fn chain(lhs: &Type, rhs: &Type) -> Result<Type, TypingError> {
     let (mut lhs, mut rhs) = (lhs.clone(), rhs.clone());
 
-    let mut restrictions = restrict(&lhs, &rhs);
+    let mut restrictions = constrain_chain(&lhs, &rhs);
 
     while restrictions.len() != 0 {
-        // println!("restrictions {:?}", restrictions);
-        // println!("types {} {}", lhs, rhs);
+        // println!("\ttypes lhs {} rhs {}", lhs, rhs);
+        // println!("\trestrictions {:?}", restrictions);
         for restriction in restrictions {
-            let (lhs_replacement, rhs_replacement) = unification(restriction)?;
-            // println!("replacements {:?} {:?}", lhs_replacement, rhs_replacement);
-            lhs = lhs.apply_replacement(&lhs_replacement);
-            rhs = rhs.apply_replacement(&rhs_replacement);
+            let replacement = chain_solve(restriction)?;
+            // println!("\t\treplacement {:?}", replacement);
+            lhs = lhs.apply_replacement(&replacement);
+            rhs = rhs.apply_replacement(&replacement);
         }
-
-        restrictions = restrict(&lhs, &rhs);
+        // println!("\tapplied types lhs {} rhs {}", lhs, rhs);
+        restrictions = constrain_chain(&lhs, &rhs);
     }
 
     Ok(Type::new(lhs.inp, rhs.out))
 }
 
-/// Поиск ограничений.
-fn restrict(lhs: &Type, rhs: &Type) -> Vec<Restriction> {
-    let mut lhs_iter = lhs.out.iter().rev().into_iter().peekable();
-    let mut rhs_iter = rhs.inp.iter().rev().into_iter().peekable();
-    let mut restrictions: Vec<Restriction> = vec![];
+/// Поиск ограничений сцепки
+/// 
+/// Сцепка -- выход первого типа должен совпадать с входом второй типа.
+fn constrain_chain(lhs: &Type, rhs: &Type) -> Vec<Constraint> {
+    constrain(&lhs.out, &rhs.inp)
+}
 
-    // TODO рекурсия
+/// Поиск ограничений эквивалентности
+/// 
+/// Эквивалетность типов -- вход и выход первого типа совпадают с входом и выходом второго типа.
+fn constrain_equivalence(lhs: &Type, rhs: &Type) -> Vec<Constraint> {
+    let mut constraints: Vec<Constraint> = vec![];
+
+    constraints.append(&mut constrain(&lhs.inp, &rhs.inp));
+    constraints.append(&mut constrain(&lhs.out, &rhs.out));
+
+    constraints
+}
+
+/// Поиск ограничений для двух стековых конфигураций
+fn constrain(lhs: &StackCfg, rhs: &StackCfg) -> Vec<Constraint> {
+    let mut lhs_iter = lhs.iter().rev().into_iter().peekable();
+    let mut rhs_iter = rhs.iter().rev().into_iter().peekable();
+    let mut constraints: Vec<Constraint> = vec![];
+
     while lhs_iter.peek().is_some() || rhs_iter.peek().is_some() {
         let lhs = lhs_iter.next().unwrap();
         let lhs_has_next = lhs_iter.peek().is_some();
-        // println!("restrict lhs {:?} {:?}", lhs, lhs_has_next);
-
         let rhs = rhs_iter.next().unwrap();
         let rhs_has_next = rhs_iter.peek().is_some();
-        // println!("restrict rhs {:?} {:?}", rhs, rhs_has_next);
 
         if lhs_has_next == rhs_has_next {
             if lhs != rhs {
-                restrictions.push(Restriction::Unification(lhs.clone(), rhs.clone()));
+                if let Term::Quote { inner: lhs } = lhs && let Term::Quote { inner: rhs } = rhs {
+                    constraints.append(&mut constrain_equivalence(lhs, rhs));
+                } else {
+                    constraints.push(Constraint::Unification(lhs.clone(), rhs.clone()));
+                }
             }
         } else if !rhs_has_next {
             let lhs: Vec<Term> = vec![lhs.clone()]
@@ -230,7 +258,7 @@ fn restrict(lhs: &Type, rhs: &Type) -> Vec<Restriction> {
                 .rev()
                 .collect();
             let rhs: Vec<Term> = vec![rhs.clone()];
-            restrictions.push(Restriction::StackExtension(lhs, rhs));
+            constraints.push(Constraint::TailExtension(lhs, rhs));
             break;
         } else if !lhs_has_next {
             let lhs: Vec<Term> = vec![lhs.clone()];
@@ -239,52 +267,56 @@ fn restrict(lhs: &Type, rhs: &Type) -> Vec<Restriction> {
                 .chain(rhs_iter.map(|term| term.clone()))
                 .rev()
                 .collect();
-            restrictions.push(Restriction::StackExtension(lhs, rhs));
+            constraints.push(Constraint::TailExtension(lhs, rhs));
             break;
         }
     }
 
-    restrictions
+    constraints
 }
 
-/// Поиск подстановки. Подстановка -- сведение двух конфигураций в одну согласно правилам:
+/// Поиск решения для ограничения. Подстановка -- сведение двух конфигураций в одну согласно правилам:
 ///
 /// 1. Если два типа, то выбирается наиболее конкретный (пример, Int и Var -> Int)
 /// 2. Если конфигурации разного размера, то выбирается наиболее длинная. По сути -- сводится к п.1, если считать, что наиболее общий == наиболее длинный.
-fn unification(restriction: Restriction) -> Result<(Replacement, Replacement), TypingError> {
+fn chain_solve(restriction: Constraint) -> Result<Replacement, TypingError> {
+    // println!("\t\tunification for {:?}", restriction);
     match restriction {
-        Restriction::Unification(lhs, rhs) => {
+        Constraint::Unification(lhs, rhs) => {
             // Пока правила достаточно простые, reduce всегда возвращает `Ok(to)`, если сведение возможно
-            let reduce_lhs = reduce(&lhs, &rhs).is_some();
-            let reduce_rhs = reduce(&rhs, &lhs).is_some();
-            if reduce_lhs {
-                Ok((Replacement::term(lhs, rhs), Replacement::Identity))
-            } else if reduce_rhs {
-                Ok((Replacement::Identity, Replacement::term(rhs, lhs)))
+            let r_lhs = chain_reduce(&lhs, &rhs).is_some();
+            let r_rhs = chain_reduce(&rhs, &lhs).is_some();
+            // println!("\t\treduce_lhs {} reduce_rhs {}", r_lhs, r_rhs);
+            // Приоритетно менять правую часть, чтобы не возникло циклов
+            // Но вообще надо бы подумать, действительно ли никак не решить цикл без этого странного необходимого порядка
+            if r_rhs {
+                Ok(Replacement::term(rhs, lhs))
+            } else if r_lhs {
+                Ok(Replacement::term(lhs, rhs))
             } else {
                 Err(TypingError::IncompatibleTypes(lhs, rhs))
             }
         }
-        Restriction::StackExtension(lhs, rhs) => {
+        Constraint::TailExtension(lhs, rhs) => {
             if lhs.len() < rhs.len() {
-                Ok((Replacement::stack(lhs, rhs), Replacement::Identity))
+                Ok(Replacement::stack(lhs, rhs))
             } else if lhs.len() > rhs.len() {
-                Ok((Replacement::Identity, Replacement::stack(rhs, lhs)))
+                Ok(Replacement::stack(rhs, lhs))
             } else {
-                Ok((Replacement::Identity, Replacement::Identity))
+                Ok(Replacement::Identity)
             }
         }
     }
 }
 
-/// Если переменную `from` можно свести к `to`, то функция возвращает рельтат сведения.
-fn reduce<'t>(from: &'t Term, to: &'t Term) -> Option<&'t Term> {
+/// Если переменную `from` можно свести к `to` в контексте сцепки типов, то функция возвращает рельтат сведения
+fn chain_reduce<'t>(from: &'t Term, to: &'t Term) -> Option<&'t Term> {
     match (from, to) {
         // Стек можно свести только к другому стеку
-        (Term::Stack(_), Term::Stack(_)) => Option::Some(to),
+        (Term::Tail(_), Term::Tail(_)) => Option::Some(to),
 
         // Переменную можно свести к любому более конкретному типу
-        (Term::Var(_), Term::Stack(_)) => Option::Some(to),
+        (Term::Var(_), Term::Tail(_)) => Option::Some(to),
         (Term::Var(_), Term::Var(_)) => Option::Some(to),
         (Term::Var(_), Term::Quote { inner: _ }) => Option::Some(to),
         (Term::Var(_), Term::Int) => Option::Some(to),

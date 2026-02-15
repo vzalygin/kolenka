@@ -2,11 +2,10 @@
 
 use std::{
     collections::HashMap,
-    fmt::Display,
-    sync::atomic::{AtomicI64, Ordering},
+    sync::atomic::{AtomicU32, Ordering},
 };
 
-static GLOBAL_ID: AtomicI64 = AtomicI64::new(0);
+static GLOBAL_ID: AtomicU32 = AtomicU32::new(0);
 
 #[derive(PartialEq, Eq, Hash, Clone, Debug)]
 pub struct Type {
@@ -24,45 +23,57 @@ impl Type {
 
     /// Тип тривиальной программы -- программы, которая ничего не делает
     pub(crate) fn trivial() -> Type {
-        let stack = Term::stack();
+        let stack = Term::tail();
         Type::new([stack.clone()], [stack])
     }
 
-    fn fmt_stack_cfg<'t>(
+    fn fmt_stack_cfg<'a>(
         f: &mut std::fmt::Formatter<'_>,
-        stack_cfg: &'t StackCfg,
-        term_names: &mut HashMap<&'t Term, String>,
+        stack_cfg: &'a StackCfg,
+        term_names: &mut HashMap<&'a Term, String>,
         stack_names_it: &mut impl Iterator<Item = char>,
         var_names_it: &mut impl Iterator<Item = char>,
     ) -> std::fmt::Result {
         for (i, term) in stack_cfg.iter().enumerate() {
             match term {
-                Term::Stack(_) => {
+                Term::Tail(_) => {
                     let name = term_names
                         .entry(term)
-                        .or_insert(stack_names_it.next().unwrap().to_string());
-
+                        .or_insert_with(|| stack_names_it.next().unwrap().to_string());
                     write!(f, "{}", name)?;
                 }
                 Term::Var(_) => {
                     let name = term_names
                         .entry(term)
-                        .or_insert(var_names_it.next().unwrap().to_string());
-
+                        .or_insert_with(|| var_names_it.next().unwrap().to_string());
                     write!(f, "{}", name)?;
                 }
                 Term::Quote { inner } => {
                     write!(f, "(")?;
-                    inner.fmt(f)?;
+                    inner.fmt_inner(f, term_names, stack_names_it, var_names_it)?;
                     write!(f, ")")?;
                 }
-                Term::Int => write!(f, "int")?,
-                Term::Bool => write!(f, "bool")?,
+                Term::Int => write!(f, "'i")?,
+                Term::Bool => write!(f, "'b")?,
             }
             if i != stack_cfg.len() - 1 {
                 write!(f, " ")?;
             }
         }
+
+        Ok(())
+    }
+
+    fn fmt_inner<'a>(
+        &'a self,
+        f: &mut std::fmt::Formatter<'_>,
+        term_names: &mut HashMap<&'a Term, String>,
+        stack_names_it: &mut impl Iterator<Item = char>,
+        var_names_it: &mut impl Iterator<Item = char>,
+    ) -> std::fmt::Result {
+        Type::fmt_stack_cfg(f, &self.inp, term_names, stack_names_it, var_names_it)?;
+        write!(f, " -> ")?;
+        Type::fmt_stack_cfg(f, &self.out, term_names, stack_names_it, var_names_it)?;
 
         Ok(())
     }
@@ -100,9 +111,9 @@ impl std::fmt::Display for Type {
 pub(crate) type StackCfg = Vec<Term>;
 
 #[derive(PartialEq, Eq, Hash, Clone, Debug)]
-pub(crate) enum Term {
-    Stack(Id), // Стек и переменная могут обозначать разные по сути типы,
-    Var(Id),   // поэтому надо различать их при помощи идентификаторов
+pub enum Term {
+    Tail(Id), // Стек и переменная могут обозначать разные по сути типы,
+    Var(Id),  // поэтому надо различать их при помощи идентификаторов
 
     Quote { inner: Type },
 
@@ -111,12 +122,12 @@ pub(crate) enum Term {
 }
 
 impl Term {
-    pub(crate) fn stack() -> Term {
-        Term::Stack(Id::new())
+    pub(crate) fn tail() -> Term {
+        Term::Tail(Id::id())
     }
 
     pub(crate) fn var() -> Term {
-        Term::Var(Id::new())
+        Term::Var(Id::id())
     }
 
     pub(crate) fn quote(inner: Type) -> Term {
@@ -133,10 +144,10 @@ impl Term {
 }
 
 #[derive(PartialEq, Eq, Hash, Clone, Debug)]
-pub(crate) struct Id(i64);
+pub(crate) struct Id(u32);
 
 impl Id {
-    fn new() -> Id {
+    fn id() -> Id {
         Id(GLOBAL_ID.fetch_add(1, Ordering::Relaxed))
     }
 }

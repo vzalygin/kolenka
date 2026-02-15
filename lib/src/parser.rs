@@ -64,7 +64,7 @@ pub(crate) enum AstNode {
 #[derive(Debug, Clone)]
 pub(crate) enum Builtin {
     // control
-    Apply,
+    Eval,
     If,
 
     // math ops
@@ -163,7 +163,7 @@ fn bool<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, AstNode,
 fn builtin<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, AstNode, E> {
     map(
         alt((
-            map(tag("apply"), |_| Builtin::Apply),
+            map(tag("eval"), |_| Builtin::Eval),
             map(tag("if"), |_| Builtin::If),
             map(tag("add"), |_| Builtin::Add),
             map(tag("sub"), |_| Builtin::Sub),
