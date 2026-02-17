@@ -1,6 +1,6 @@
 use thiserror::Error;
 
-use crate::pass::TypingError;
+use crate::typing::TypingError;
 
 #[derive(Error, Debug)]
 pub enum CompilerError {

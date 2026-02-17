@@ -3,7 +3,9 @@
 use thiserror::Error;
 
 use crate::{
-    CompilerError, Context, parser::{Ast, AstNode, Builtin}, pass::typing::{StackCfg, Term, Type}
+    CompilerError, Context,
+    parser::{Ast, AstNode, Builtin},
+    typing::types::{StackCfg, Term, Type},
 };
 
 #[derive(Error, Debug)]
@@ -78,7 +80,7 @@ fn stack_cfg_apply_replacement(old: StackCfg, replacement: &Replacement) -> Stac
 
 /// Вывод типа для всей программы
 pub fn infer_ast(ast: &Ast, ctx: &mut Context) -> Result<Type, CompilerError> {
-    infer(&ast.program, ctx).map_err(|e| CompilerError::TypingError(e))
+    infer(&ast.program, ctx).map_err(CompilerError::TypingError)
 }
 
 /// Вывод типа для последовательности команд
@@ -193,7 +195,7 @@ fn chain(lhs: &Type, rhs: &Type, ctx: &mut Context) -> Result<Type, TypingError>
 
     let mut restrictions = constrain_chain(&lhs, &rhs, ctx);
 
-    while restrictions.len() != 0 {
+    while !restrictions.is_empty() {
         ctx.emit_debug(format!("\ttypes lhs {} rhs {}", lhs, rhs));
         ctx.emit_debug(format!("\trestrictions {:?}", restrictions));
         for restriction in restrictions {
@@ -230,8 +232,8 @@ fn constrain_equivalence(lhs: &Type, rhs: &Type, ctx: &mut Context) -> Vec<Const
 
 /// Поиск ограничений для двух стековых конфигураций
 fn constrain(lhs: &StackCfg, rhs: &StackCfg, ctx: &mut Context) -> Vec<Constraint> {
-    let mut lhs_iter = lhs.iter().rev().into_iter().peekable();
-    let mut rhs_iter = rhs.iter().rev().into_iter().peekable();
+    let mut lhs_iter = lhs.iter().rev().peekable();
+    let mut rhs_iter = rhs.iter().rev().peekable();
     let mut constraints: Vec<Constraint> = vec![];
 
     while lhs_iter.peek().is_some() || rhs_iter.peek().is_some() {
@@ -253,7 +255,7 @@ fn constrain(lhs: &StackCfg, rhs: &StackCfg, ctx: &mut Context) -> Vec<Constrain
         } else if !rhs_has_next {
             let lhs: Vec<Term> = vec![lhs.clone()]
                 .into_iter()
-                .chain(lhs_iter.map(|term| term.clone()))
+                .chain(lhs_iter.cloned())
                 .rev()
                 .collect();
             let rhs: Vec<Term> = vec![rhs.clone()];
@@ -263,7 +265,7 @@ fn constrain(lhs: &StackCfg, rhs: &StackCfg, ctx: &mut Context) -> Vec<Constrain
             let lhs: Vec<Term> = vec![lhs.clone()];
             let rhs: Vec<Term> = vec![rhs.clone()]
                 .into_iter()
-                .chain(rhs_iter.map(|term| term.clone()))
+                .chain(rhs_iter.cloned())
                 .rev()
                 .collect();
             constraints.push(Constraint::TailExtension(lhs, rhs));

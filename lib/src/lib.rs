@@ -1,13 +1,13 @@
 mod context;
 mod error;
 mod parser;
-mod pass;
+mod typing;
 
 pub use crate::{
     context::{Context, LogLevel},
     error::CompilerError,
     parser::{Ast, parse_source},
-    pass::{Type, infer_ast},
+    typing::{Type, infer_ast},
 };
 
 #[cfg(test)]
