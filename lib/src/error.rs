@@ -1,7 +1,11 @@
 use thiserror::Error;
 
+use crate::typing::TypingError;
+
 #[derive(Error, Debug)]
-pub(crate) enum CompilerError {
-    #[error("Syntax error: {description:?}")]
+pub enum CompilerError {
+    #[error("syntax error: {description}")]
     ParserError { description: String },
+    #[error("typing error: {0}")]
+    TypingError(TypingError),
 }

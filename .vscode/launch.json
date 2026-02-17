@@ -5,6 +5,19 @@
     "version": "0.2.0",
     "configurations": [
         {
+            "name": "Debug executable 'kolenka'",
+            "type": "lldb",
+            "request": "launch",
+            "cargo": {
+                "args": [
+                    "run",
+                    "--bin=kolenka",
+                    "--package=kolenka"
+                ]
+            },
+            "args": []
+        },
+        {
             "name": "Debug",
             "type": "lldb",
             "request": "launch",

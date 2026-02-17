@@ -41,7 +41,7 @@ use crate::{context::Context, error::CompilerError};
 /// <Program>       ::= { <Define> | <Extern> | <Term> } ;
 
 #[derive(Debug, Clone)]
-pub(crate) struct Ast {
+pub struct Ast {
     pub(crate) program: Program,
 }
 
@@ -64,7 +64,7 @@ pub(crate) enum AstNode {
 #[derive(Debug, Clone)]
 pub(crate) enum Builtin {
     // control
-    Apply,
+    Eval,
     If,
 
     // math ops
@@ -79,18 +79,18 @@ pub(crate) enum Builtin {
     Swap,
 }
 
-pub(crate) fn parse_source(ctx: &mut Context, input: &str) -> Result<Ast, ()> {
+pub fn parse_source(input: &str, ctx: &mut Context) -> Result<Ast, CompilerError> {
     match program::<VerboseError<&str>>(input).finish() {
         Ok((_, ast)) => {
-            ctx.emit_debug("parsed");
-            ctx.emit_debug(format!("parser result: {:#?}", ast));
+            ctx.emit_debug(format!("parsed {:?}", ast));
             Ok(ast)
         }
-        Err(error) => {
-            ctx.emit_err(CompilerError::ParserError {
-                description: convert_error(input, error),
-            });
-            Err(())
+        Err(e) => {
+            let e = CompilerError::ParserError {
+                description: convert_error(input, e),
+            };
+            ctx.emit_err(&e);
+            Err(e)
         }
     }
 }
@@ -161,7 +161,7 @@ fn bool<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, AstNode,
 fn builtin<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, AstNode, E> {
     map(
         alt((
-            map(tag("apply"), |_| Builtin::Apply),
+            map(tag("eval"), |_| Builtin::Eval),
             map(tag("if"), |_| Builtin::If),
             map(tag("add"), |_| Builtin::Add),
             map(tag("sub"), |_| Builtin::Sub),
