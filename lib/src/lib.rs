@@ -1,5 +1,7 @@
+mod codegen;
 mod context;
 mod error;
+mod hir;
 mod parser;
 mod typing;
 

@@ -10,3 +10,4 @@ authors = [
 nom = "7"
 thiserror = "2"
 colored = "3"
+wasm-encoder = "0.245"

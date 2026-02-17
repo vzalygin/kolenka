@@ -1,9 +1,12 @@
+mod wasm;
+
 use colored::Colorize;
 use std::io::{self, Write};
 
 use lib::{CompilerError, Context, LogLevel, infer_ast, parse_source};
 
 fn main() {
+    wasm::module();
     loop {
         print!("{} ", "ready :>".cyan());
         io::stdout().flush().unwrap();

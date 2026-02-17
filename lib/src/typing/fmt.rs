@@ -1,4 +1,4 @@
-//! Модуль с имплами std::fmt::Display
+//! Модуль с имплами [`std::fmt::Display`] для структур вывод типов.
 
 use colored::Colorize;
 use std::collections::HashMap;
