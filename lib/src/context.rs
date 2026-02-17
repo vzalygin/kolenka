@@ -3,9 +3,9 @@ use std::io;
 
 use crate::error::CompilerError;
 
-const LOG_SHIFT: &str = "\t";
+const LOG_INDENT: &str = "\t";
 
-#[derive(Clone, Debug, PartialOrd, Ord, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialOrd, Ord, PartialEq, Eq)]
 pub enum LogLevel {
     Debug,
     Warn,
@@ -16,7 +16,7 @@ pub enum LogLevel {
 pub struct Context<'w> {
     writer: &'w mut dyn io::Write,
     log_level: LogLevel,
-    shift: String,
+    indent: String,
 }
 
 impl<'w> Context<'w> {
@@ -24,28 +24,35 @@ impl<'w> Context<'w> {
         Context {
             writer: writer,
             log_level,
-            shift: "".to_string(),
+            indent: "".to_string(),
         }
     }
 
     pub(crate) fn step(&mut self) -> Context<'_> {
         Context {
             writer: self.writer,
-            log_level: self.log_level.clone(),
-            shift: self.shift.clone() + LOG_SHIFT,
+            log_level: self.log_level,
+            indent: self.indent.clone() + LOG_INDENT,
         }
     }
 
     pub(crate) fn emit_err(&mut self, err: &CompilerError) {
         if self.log_level <= LogLevel::Error {
-            writeln!(self.writer, "{}{} {}", "error".red(), self.shift, err).expect("Cannot emit err log");
+            writeln!(self.writer, "{}{} {}", "error".red(), self.indent, err)
+                .expect("cannot emit err log");
         }
     }
 
     pub(crate) fn emit_warn(&mut self, msg: impl Into<String>) {
         if self.log_level <= LogLevel::Warn {
-            writeln!(self.writer, "{}{} {}", "warn ".yellow(), self.shift, msg.into())
-                .expect("cannot emit warn log");
+            writeln!(
+                self.writer,
+                "{}{} {}",
+                "warn ".yellow(),
+                self.indent,
+                msg.into()
+            )
+            .expect("cannot emit warn log");
         }
     }
 
@@ -55,7 +62,7 @@ impl<'w> Context<'w> {
                 self.writer,
                 "{}{} {}",
                 "debug".truecolor(0, 10, 10),
-                self.shift,
+                self.indent,
                 msg.into()
             )
             .expect("cannot emit debug log");

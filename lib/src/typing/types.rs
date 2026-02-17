@@ -1,4 +1,4 @@
-//! Модель типов
+//! Модель типов.
 
 use std::sync::atomic::{AtomicU32, Ordering};
 

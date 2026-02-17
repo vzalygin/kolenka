@@ -10,3 +10,4 @@ authors = [
 lib = { path = "../lib" }
 
 colored = "3"
+wasm-encoder = "0.245"
