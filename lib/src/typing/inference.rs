@@ -88,9 +88,10 @@ fn infer(nodes: &Vec<AstNode>, ctx: &mut Context) -> Result<Type, TypingError> {
     let mut prog_type = Type::trivial();
 
     for node in nodes {
-        let node_type = get_node_type(node, ctx)?;
-        ctx.emit_debug(format!("chaining {:?} node type: {}", node, node_type));
-        prog_type = chain(&prog_type, &node_type, ctx)?;
+        ctx.emit_debug(format!("chaining {:?}", node));
+        let node_type = get_node_type(node, &mut ctx.step())?;
+        ctx.emit_debug(format!("chain node type: {}", node_type));
+        prog_type = chain(&prog_type, &node_type, &mut ctx.step())?;
         ctx.emit_debug(format!("chained type {}", prog_type));
     }
 
@@ -178,7 +179,8 @@ fn get_node_type(node: &AstNode, ctx: &mut Context) -> Result<Type, TypingError>
         }
         AstNode::Quote { value } => {
             let tail = Term::tail();
-            let quote = Term::quote(infer(value, ctx)?);
+            ctx.emit_debug(format!("infer quote {:?}", value));
+            let quote = Term::quote(infer(value, &mut ctx.step())?);
 
             Ok(Type::new([tail.clone()], [tail, quote])) // T-QUOTE rule
         }
@@ -193,19 +195,19 @@ fn get_node_type(node: &AstNode, ctx: &mut Context) -> Result<Type, TypingError>
 fn chain(lhs: &Type, rhs: &Type, ctx: &mut Context) -> Result<Type, TypingError> {
     let (mut lhs, mut rhs) = (lhs.clone(), rhs.clone());
 
-    let mut restrictions = constrain_chain(&lhs, &rhs, ctx);
+    let mut restrictions = constrain_chain(&lhs, &rhs, &mut ctx.step());
 
     while !restrictions.is_empty() {
-        ctx.emit_debug(format!("\ttypes lhs {} rhs {}", lhs, rhs));
-        ctx.emit_debug(format!("\trestrictions {:?}", restrictions));
+        ctx.emit_debug(format!("types lhs {} rhs {}", lhs, rhs));
+        ctx.emit_debug(format!("restrictions {:?}", restrictions));
         for restriction in restrictions {
-            let replacement = chain_solve(restriction, ctx)?;
-            ctx.emit_debug(format!("\t\treplacement {:?}", replacement));
+            let replacement = chain_solve(restriction, &mut ctx.step())?;
+            ctx.emit_debug(format!("replacement {:?}", replacement));
             lhs = lhs.apply_replacement(&replacement);
             rhs = rhs.apply_replacement(&replacement);
         }
-        ctx.emit_debug(format!("\tapplied types lhs {} rhs {}", lhs, rhs));
-        restrictions = constrain_chain(&lhs, &rhs, ctx);
+        ctx.emit_debug(format!("applied types lhs {} rhs {}", lhs, rhs));
+        restrictions = constrain_chain(&lhs, &rhs, &mut ctx.step());
     }
 
     Ok(Type::new(lhs.inp, rhs.out))
@@ -247,7 +249,7 @@ fn constrain(lhs: &StackCfg, rhs: &StackCfg, ctx: &mut Context) -> Vec<Constrain
                 if let Term::Quote { inner: lhs } = lhs
                     && let Term::Quote { inner: rhs } = rhs
                 {
-                    constraints.append(&mut constrain_equivalence(lhs, rhs, ctx));
+                    constraints.append(&mut constrain_equivalence(lhs, rhs, &mut ctx.step()));
                 } else {
                     constraints.push(Constraint::Unification(lhs.clone(), rhs.clone()));
                 }
@@ -281,13 +283,13 @@ fn constrain(lhs: &StackCfg, rhs: &StackCfg, ctx: &mut Context) -> Vec<Constrain
 /// 1. Если два типа, то выбирается наиболее конкретный (пример, Int и Var -> Int)
 /// 2. Если конфигурации разного размера, то выбирается наиболее длинная. По сути -- сводится к п.1, если считать, что наиболее общий == наиболее длинный.
 fn chain_solve(restriction: Constraint, ctx: &mut Context) -> Result<Replacement, TypingError> {
-    ctx.emit_debug(format!("\t\tunification for {:?}", restriction));
+    ctx.emit_debug(format!("unification for {:?}", restriction));
     match restriction {
         Constraint::Unification(lhs, rhs) => {
             // Пока правила достаточно простые, reduce всегда возвращает `Ok(to)`, если сведение возможно
             let r_lhs = chain_reduce(&lhs, &rhs).is_some();
             let r_rhs = chain_reduce(&rhs, &lhs).is_some();
-            ctx.emit_debug(format!("\t\treduce_lhs {} reduce_rhs {}", r_lhs, r_rhs));
+            ctx.emit_debug(format!("reduce_lhs {} reduce_rhs {}", r_lhs, r_rhs));
             // Приоритетно менять правую часть, чтобы не возникло циклов
             // Но вообще надо бы подумать, действительно ли никак не решить цикл без этого странного необходимого порядка
             if r_rhs {

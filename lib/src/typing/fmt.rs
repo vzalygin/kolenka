@@ -1,7 +1,7 @@
 //! Модуль с имплами std::fmt::Display
 
-use std::collections::HashMap;
 use colored::Colorize;
+use std::collections::HashMap;
 
 use crate::{
     Type,

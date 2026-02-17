@@ -18,8 +18,10 @@ fn main() {
 }
 
 fn compile(source: String) -> Result<(), CompilerError> {
-    let mut parser_context = Context::new(std::io::stdout(), LogLevel::Debug);
-    let mut typing_context = Context::new(std::io::stdout(), LogLevel::Debug);
+    let mut parser_stdout = std::io::stdout();
+    let mut parser_context = Context::new(&mut parser_stdout, LogLevel::Debug);
+    let mut typing_stdout = std::io::stdout();
+    let mut typing_context = Context::new(&mut typing_stdout, LogLevel::Debug);
 
     let ast = parse_source(&source, &mut parser_context)?;
 

@@ -3,6 +3,8 @@ use std::io;
 
 use crate::error::CompilerError;
 
+const LOG_SHIFT: &str = "\t";
+
 #[derive(Clone, Debug, PartialOrd, Ord, PartialEq, Eq)]
 pub enum LogLevel {
     Debug,
@@ -11,36 +13,38 @@ pub enum LogLevel {
     Never,
 }
 
-pub struct Context {
-    write: Box<dyn io::Write>,
+pub struct Context<'w> {
+    writer: &'w mut dyn io::Write,
     log_level: LogLevel,
+    shift: String,
 }
 
-impl Context {
-    pub fn new<W: io::Write + 'static>(write: W, log_level: LogLevel) -> Context {
+impl<'w> Context<'w> {
+    pub fn new<W: io::Write + 'static>(writer: &'w mut W, log_level: LogLevel) -> Context<'w> {
         Context {
-            write: Box::new(write),
+            writer: writer,
             log_level,
+            shift: "".to_string(),
         }
     }
 
-    // pub(crate) fn deeper(&self) -> Context {
-    //     Context {
-    //         write: self.write.clone_box(),
-    //         log_level: self.log_level.clone(),
-    //         tab: self.tab.clone() + "\t",
-    //     }
-    // }
+    pub(crate) fn step(&mut self) -> Context<'_> {
+        Context {
+            writer: self.writer,
+            log_level: self.log_level.clone(),
+            shift: self.shift.clone() + LOG_SHIFT,
+        }
+    }
 
     pub(crate) fn emit_err(&mut self, err: &CompilerError) {
         if self.log_level <= LogLevel::Error {
-            writeln!(self.write, "{} {}", "error".red(), err).expect("Cannot emit err log");
+            writeln!(self.writer, "{}{} {}", "error".red(), self.shift, err).expect("Cannot emit err log");
         }
     }
 
     pub(crate) fn emit_warn(&mut self, msg: impl Into<String>) {
         if self.log_level <= LogLevel::Warn {
-            writeln!(self.write, "{} {}", "warn ".yellow(), msg.into())
+            writeln!(self.writer, "{}{} {}", "warn ".yellow(), self.shift, msg.into())
                 .expect("cannot emit warn log");
         }
     }
@@ -48,9 +52,10 @@ impl Context {
     pub(crate) fn emit_debug(&mut self, msg: impl Into<String>) {
         if self.log_level <= LogLevel::Debug {
             writeln!(
-                self.write,
-                "{} {}",
+                self.writer,
+                "{}{} {}",
                 "debug".truecolor(0, 10, 10),
+                self.shift,
                 msg.into()
             )
             .expect("cannot emit debug log");
