@@ -54,9 +54,12 @@ impl Type {
         stack_names_it: &mut impl Iterator<Item = char>,
         var_names_it: &mut impl Iterator<Item = char>,
     ) -> std::fmt::Result {
-        Type::fmt_stack_cfg(f, &self.inp, term_names, stack_names_it, var_names_it)?;
-        write!(f, "{}", " -> ".bright_white())?;
-        Type::fmt_stack_cfg(f, &self.out, term_names, stack_names_it, var_names_it)?;
+        for (i, stack_cfg) in self.seq.iter().enumerate() {
+            Type::fmt_stack_cfg(f, stack_cfg, term_names, stack_names_it, var_names_it)?;
+            if i != self.seq.len() - 1 {
+                write!(f, "{}", " -> ".bright_white())?;
+            }
+        }
 
         Ok(())
     }
@@ -79,25 +82,45 @@ impl Term {
         var_names_it: &mut impl Iterator<Item = char>,
     ) -> std::fmt::Result {
         match self {
-            Term::Tail(_) => {
+            Term::Tail(id) => {
                 let name = term_names
                     .entry(self)
                     .or_insert_with(|| stack_names_it.next().unwrap().to_string());
-                write!(f, "{}", name.bright_green())?;
+                write!(
+                    f,
+                    "{}{}",
+                    name.bright_green(),
+                    id.0.to_string().bright_green()
+                )?;
             }
-            Term::Var(_) => {
+            Term::Var(id) => {
                 let name = term_names
                     .entry(self)
                     .or_insert_with(|| var_names_it.next().unwrap().to_string());
-                write!(f, "{}", name.bright_cyan())?;
+                write!(
+                    f,
+                    "{}{}",
+                    name.bright_cyan(),
+                    id.0.to_string().bright_cyan()
+                )?;
             }
             Term::Quote { inner } => {
                 write!(f, "{}", "(".bright_white())?;
                 inner.fmt_inner(f, term_names, stack_names_it, var_names_it)?;
                 write!(f, "{}", ")".bright_white())?;
             }
-            Term::Int => write!(f, "{}", "Int".bright_cyan())?,
-            Term::Bool => write!(f, "{}", "Bool".bright_cyan())?,
+            Term::Int(id) => write!(
+                f,
+                "{}{}",
+                "Int".bright_cyan(),
+                id.0.to_string().bright_cyan()
+            )?,
+            Term::Bool(id) => write!(
+                f,
+                "{}{}",
+                "Bool".bright_cyan(),
+                id.0.to_string().bright_cyan()
+            )?,
         };
 
         Ok(())
