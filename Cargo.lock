@@ -49,6 +49,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "kolenka_std"
+version = "0.1.0"
+
+[[package]]
 name = "leb128fmt"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"

@@ -44,8 +44,10 @@ impl Replacement {
 impl Type {
     fn apply_replacement(self, replacement: &Replacement) -> Type {
         Type::new(
-            stack_cfg_apply_replacement(self.inp, replacement),
-            stack_cfg_apply_replacement(self.out, replacement),
+            self.seq
+                .into_iter()
+                .map(|stack_cfg| stack_cfg_apply_replacement(stack_cfg, replacement))
+                .collect::<Vec<_>>(),
         )
     }
 }
@@ -85,15 +87,19 @@ pub fn infer_ast(ast: &Ast, ctx: &mut Context) -> Result<Type, CompilerError> {
 
 /// Вывод типа для последовательности команд
 fn infer(nodes: &Vec<AstNode>, ctx: &mut Context) -> Result<Type, TypingError> {
-    let mut prog_type = Type::trivial();
+    let mut prog_type = nodes
+        .first()
+        .map(|first| get_node_type(first, &mut ctx.step()))
+        .unwrap_or(Ok(Type::trivial()))?;
 
-    for node in nodes {
+    for node in nodes.into_iter().skip(1) {
         ctx.emit_debug(format!("chaining {:?}", node));
         let node_type = get_node_type(node, &mut ctx.step())?;
         ctx.emit_debug(format!("chain node type: {}", node_type));
         prog_type = chain(&prog_type, &node_type, &mut ctx.step())?;
-        ctx.emit_debug(format!("chained type {}", prog_type));
     }
+
+    ctx.emit_debug(format!("resulted type {}", prog_type));
 
     Ok(prog_type)
 }
@@ -116,22 +122,23 @@ fn get_node_type(node: &AstNode, ctx: &mut Context) -> Result<Type, TypingError>
             Builtin::Eval => {
                 let tail = Term::tail();
                 let new_tail = Term::tail();
-                let quote = Term::quote(Type::new([tail.clone()], [new_tail.clone()]));
-                Ok(Type::new([tail, quote], [new_tail]))
+                let quote = Term::quote(Type::from_inp_out([tail.clone()], [new_tail.clone()]));
+                Ok(Type::from_inp_out([tail, quote], [new_tail]))
             }
             Builtin::If => {
                 let tail = Term::tail();
-                let var = Term::var();
                 let bool = Term::bool();
-                Ok(Type::new(
-                    [tail.clone(), bool, var.clone(), var.clone()],
-                    [tail, var.clone()],
+                let new_tail = Term::tail();
+                let quote = Term::quote(Type::from_inp_out([tail.clone()], [new_tail.clone()]));
+                Ok(Type::from_inp_out(
+                    [tail, bool, quote.clone(), quote.clone()],
+                    [new_tail],
                 ))
             }
             Builtin::Add | Builtin::Sub | Builtin::Mul | Builtin::Div => {
                 let tail = Term::tail();
                 let int = Term::bool();
-                Ok(Type::new(
+                Ok(Type::from_inp_out(
                     [tail.clone(), int.clone(), int.clone()],
                     [tail, int.clone()],
                 ))
@@ -139,12 +146,15 @@ fn get_node_type(node: &AstNode, ctx: &mut Context) -> Result<Type, TypingError>
             Builtin::Pop => {
                 let tail = Term::tail();
                 let var = Term::var();
-                Ok(Type::new([tail.clone(), var.clone()], [tail.clone()]))
+                Ok(Type::from_inp_out(
+                    [tail.clone(), var.clone()],
+                    [tail.clone()],
+                ))
             }
             Builtin::Dup => {
                 let tail = Term::tail();
                 let var = Term::var();
-                Ok(Type::new(
+                Ok(Type::from_inp_out(
                     [tail.clone(), var.clone()],
                     [tail, var.clone(), var],
                 ))
@@ -153,7 +163,7 @@ fn get_node_type(node: &AstNode, ctx: &mut Context) -> Result<Type, TypingError>
                 let tail = Term::tail();
                 let lhs = Term::var();
                 let rhs = Term::var();
-                Ok(Type::new(
+                Ok(Type::from_inp_out(
                     [tail.clone(), lhs.clone(), rhs.clone()],
                     [tail, rhs, lhs],
                 ))
@@ -161,18 +171,18 @@ fn get_node_type(node: &AstNode, ctx: &mut Context) -> Result<Type, TypingError>
         },
         AstNode::Define { id: _, value: _ } => {
             let tail = Term::tail();
-            Ok(Type::new([tail.clone()], [tail]))
+            Ok(Type::from_inp_out([tail.clone()], [tail]))
         }
         AstNode::Int { value: _ } => {
             let tail = Term::tail();
             let int = Term::int();
-            Ok(Type::new([tail.clone()], [tail, int]))
+            Ok(Type::from_inp_out([tail.clone()], [tail, int]))
         }
         AstNode::Bool { value: _ } => {
             // TODO можно упростить с Int
             let tail = Term::tail();
             let bool = Term::bool();
-            Ok(Type::new([tail.clone()], [tail, bool]))
+            Ok(Type::from_inp_out([tail.clone()], [tail, bool]))
         }
         AstNode::Identifier { value } => {
             todo!("Тип идентификатора зависит от того, что под этим идентификатором определено")
@@ -182,7 +192,7 @@ fn get_node_type(node: &AstNode, ctx: &mut Context) -> Result<Type, TypingError>
             ctx.emit_debug(format!("infer quote {:?}", value));
             let quote = Term::quote(infer(value, &mut ctx.step())?);
 
-            Ok(Type::new([tail.clone()], [tail, quote])) // T-QUOTE rule
+            Ok(Type::from_inp_out([tail.clone()], [tail, quote])) // T-QUOTE rule
         }
     }
 }
@@ -210,24 +220,28 @@ fn chain(lhs: &Type, rhs: &Type, ctx: &mut Context) -> Result<Type, TypingError>
         restrictions = constrain_chain(&lhs, &rhs, &mut ctx.step());
     }
 
-    Ok(Type::new(lhs.inp, rhs.out))
+    Ok(lhs.append(rhs.seq.into_iter().skip(1)))
 }
 
 /// Поиск ограничений сцепки
 ///
 /// Сцепка -- выход первого типа должен совпадать с входом второй типа.
 fn constrain_chain(lhs: &Type, rhs: &Type, ctx: &mut Context) -> Vec<Constraint> {
-    constrain(&lhs.out, &rhs.inp, ctx)
+    let (_, lhs_out) = lhs.inp_out();
+    let (rhs_inp, _) = rhs.inp_out();
+    constrain(lhs_out, rhs_inp, ctx)
 }
 
 /// Поиск ограничений эквивалентности
 ///
 /// Эквивалетность типов -- вход и выход первого типа совпадают с входом и выходом второго типа.
 fn constrain_equivalence(lhs: &Type, rhs: &Type, ctx: &mut Context) -> Vec<Constraint> {
+    let (lhs_inp, lhs_out) = lhs.inp_out();
+    let (rhs_inp, rhs_out) = rhs.inp_out();
     let mut constraints: Vec<Constraint> = vec![];
 
-    constraints.append(&mut constrain(&lhs.inp, &rhs.inp, ctx));
-    constraints.append(&mut constrain(&lhs.out, &rhs.out, ctx));
+    constraints.append(&mut constrain(lhs_inp, rhs_inp, ctx));
+    constraints.append(&mut constrain(lhs_out, rhs_out, ctx));
 
     constraints
 }
@@ -322,19 +336,19 @@ fn chain_reduce<'t>(from: &'t Term, to: &'t Term) -> Option<&'t Term> {
         (Term::Var(_), Term::Tail(_)) => Option::Some(to),
         (Term::Var(_), Term::Var(_)) => Option::Some(to),
         (Term::Var(_), Term::Quote { inner: _ }) => Option::Some(to),
-        (Term::Var(_), Term::Int) => Option::Some(to),
-        (Term::Var(_), Term::Bool) => Option::Some(to),
+        (Term::Var(_), Term::Int(_)) => Option::Some(to),
+        (Term::Var(_), Term::Bool(_)) => Option::Some(to),
 
         // Цитату можно свести только к другой цитате
         (Term::Quote { inner: _ }, Term::Quote { inner: _ }) => Option::Some(to),
 
         // Число можно свести к числу и булю
-        (Term::Int, Term::Int) => Option::Some(to),
-        (Term::Int, Term::Bool) => Option::Some(to),
+        (Term::Int(_), Term::Int(_)) => Option::Some(to),
+        (Term::Int(_), Term::Bool(_)) => Option::Some(to),
 
         // Буль можно свести к булю и числу
-        (Term::Bool, Term::Int) => Option::Some(to),
-        (Term::Bool, Term::Bool) => Option::Some(to),
+        (Term::Bool(_), Term::Int(_)) => Option::Some(to),
+        (Term::Bool(_), Term::Bool(_)) => Option::Some(to),
 
         // В остальных случаях свести нельзя
         _ => Option::None,

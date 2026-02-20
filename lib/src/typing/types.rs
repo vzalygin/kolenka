@@ -6,36 +6,49 @@ static GLOBAL_ID: AtomicU32 = AtomicU32::new(0);
 
 #[derive(PartialEq, Eq, Hash, Clone, Debug)]
 pub struct Type {
-    pub(crate) inp: StackCfg,
-    pub(crate) out: StackCfg,
-}
-
-impl Type {
-    pub(crate) fn new(inp: impl Into<StackCfg>, out: impl Into<StackCfg>) -> Type {
-        Type {
-            inp: inp.into(),
-            out: out.into(),
-        }
-    }
-
-    /// Тип тривиальной программы -- программы, которая ничего не делает
-    pub(crate) fn trivial() -> Type {
-        let stack = Term::tail();
-        Type::new([stack.clone()], [stack])
-    }
+    pub(crate) seq: Vec<StackCfg>,
 }
 
 pub(crate) type StackCfg = Vec<Term>;
 
 #[derive(PartialEq, Eq, Hash, Clone, Debug)]
 pub enum Term {
-    Tail(Id), // Стек и переменная могут обозначать разные по сути типы,
-    Var(Id),  // поэтому надо различать их при помощи идентификаторов
+    Tail(Id),
+    Var(Id),
 
     Quote { inner: Type },
 
-    Int,
-    Bool,
+    Int(Id),
+    Bool(Id),
+}
+
+#[derive(PartialEq, Eq, Hash, Clone, Debug)]
+pub struct Id(pub(crate) u32);
+
+impl Type {
+    pub(crate) fn new(seq: impl Into<Vec<StackCfg>>) -> Type {
+        let seq = seq.into();
+        assert!(seq.len() >= 2, "Тип должен иметь хотя бы два состояния");
+        Type { seq }
+    }
+
+    pub(crate) fn append(self, rhs: impl Iterator<Item = StackCfg>) -> Type {
+        Type::new(self.seq.into_iter().chain(rhs).collect::<Vec<_>>())
+    }
+
+    pub(crate) fn from_inp_out(inp: impl Into<StackCfg>, out: impl Into<StackCfg>) -> Type {
+        Type::new(vec![inp.into(), out.into()])
+    }
+
+    /// Тип тривиальной программы -- программы, которая ничего не делает
+    pub(crate) fn trivial() -> Type {
+        let stack = Term::tail();
+        Type::from_inp_out([stack.clone()], [stack])
+    }
+
+    pub(crate) fn inp_out(&self) -> (&StackCfg, &StackCfg) {
+        (self.seq.first().unwrap(), self.seq.last().unwrap())
+    }
 }
 
 impl Term {
@@ -52,16 +65,13 @@ impl Term {
     }
 
     pub(crate) fn int() -> Term {
-        Term::Int
+        Term::Int(Id::new())
     }
 
     pub(crate) fn bool() -> Term {
-        Term::Bool
+        Term::Bool(Id::new())
     }
 }
-
-#[derive(PartialEq, Eq, Hash, Clone, Debug)]
-pub struct Id(u32);
 
 impl Id {
     fn new() -> Id {
