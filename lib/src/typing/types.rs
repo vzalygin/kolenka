@@ -1,6 +1,9 @@
 //! Модель типов.
 
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::{
+    collections::HashMap,
+    sync::atomic::{AtomicU32, Ordering},
+};
 
 static GLOBAL_ID: AtomicU32 = AtomicU32::new(0);
 
@@ -48,6 +51,39 @@ impl Type {
 
     pub(crate) fn inp_out(&self) -> (&StackCfg, &StackCfg) {
         (self.seq.first().unwrap(), self.seq.last().unwrap())
+    }
+
+    pub(crate) fn clone_inp_out(&self) -> Type {
+        let (inp, out) = self.inp_out();
+        Type::from_inp_out(inp.clone(), out.clone())
+    }
+
+    pub(crate) fn clone_id(&self) -> Type {
+        let mut replacements: HashMap<Term, Term> = HashMap::new();
+
+        let new_seq: Vec<StackCfg> = self
+            .seq
+            .iter()
+            .map(|stack_cfg| {
+                stack_cfg
+                    .iter()
+                    .map(|term| {
+                        replacements
+                            .entry(term.clone())
+                            .or_insert_with(|| match term {
+                                Term::Tail(_) => Term::tail(),
+                                Term::Var(_) => Term::var(),
+                                Term::Quote { inner } => Term::quote(inner.clone_id()),
+                                Term::Int(_) => Term::int(),
+                                Term::Bool(_) => Term::bool(),
+                            })
+                            .clone()
+                    })
+                    .collect()
+            })
+            .collect();
+
+        Type::new(new_seq)
     }
 }
 

@@ -22,7 +22,7 @@ pub struct Context<'w> {
 impl<'w> Context<'w> {
     pub fn new<W: io::Write + 'static>(writer: &'w mut W, log_level: LogLevel) -> Context<'w> {
         Context {
-            writer: writer,
+            writer,
             log_level,
             indent: "".to_string(),
         }
