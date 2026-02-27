@@ -1,10 +1,12 @@
 //! Модуль с алгоритмами выводов типов для [`crate::parser::Ast`].
 
+use std::collections::HashMap;
+
 use thiserror::Error;
 
 use crate::{
     CompilerError, Context,
-    parser::{Ast, AstNode, Builtin},
+    parser::{Ast, AstNode, Builtin, Program},
     typing::types::{StackCfg, Term, Type},
 };
 
@@ -12,6 +14,8 @@ use crate::{
 pub enum TypingError {
     #[error("Incompatible types {0} and {1}")]
     IncompatibleTypes(Term, Term),
+    #[error("Unknown id {0}")]
+    UnknownIdentifier(String),
 }
 
 /// Представление ограничения
@@ -28,8 +32,12 @@ enum Constraint {
 #[derive(Debug)]
 enum Replacement {
     Stack(StackCfg, StackCfg),
-    Identity,
+    Identity, // TODO убрать этот инвариант, тк он бесполезен
 }
+
+type DefMap = HashMap<String, Program>;
+
+type DefTypes = HashMap<String, Type>;
 
 impl Replacement {
     fn stack(from: StackCfg, to: StackCfg) -> Replacement {
@@ -46,55 +54,76 @@ impl Type {
         Type::new(
             self.seq
                 .into_iter()
-                .map(|stack_cfg| stack_cfg_apply_replacement(stack_cfg, replacement))
+                .map(|stack_cfg| Type::stack_cfg_apply_replacement(stack_cfg, replacement))
                 .collect::<Vec<_>>(),
         )
     }
-}
 
-fn stack_cfg_apply_replacement(old: StackCfg, replacement: &Replacement) -> StackCfg {
-    match replacement {
-        Replacement::Stack(from, to) => {
-            let mut new: StackCfg = vec![];
-            let mut i = 0;
+    fn stack_cfg_apply_replacement(old: StackCfg, replacement: &Replacement) -> StackCfg {
+        match replacement {
+            Replacement::Stack(from, to) => {
+                let mut new: StackCfg = vec![];
+                let mut i = 0;
 
-            while i < old.len() {
-                if old[i..].starts_with(from) {
-                    let mut to = to.clone();
-                    new.append(&mut to);
-                    i += from.len();
-                } else {
-                    let old = old[i].clone();
-                    if let Term::Quote { inner } = old {
-                        new.push(Term::quote(inner.apply_replacement(replacement)));
+                while i < old.len() {
+                    if old[i..].starts_with(from) {
+                        let mut to = to.clone();
+                        new.append(&mut to);
+                        i += from.len();
                     } else {
-                        new.push(old);
+                        let old = old[i].clone();
+                        if let Term::Quote { inner } = old {
+                            new.push(Term::quote(inner.apply_replacement(replacement)));
+                        } else {
+                            new.push(old);
+                        }
+                        i += 1;
                     }
-                    i += 1;
                 }
-            }
 
-            new
+                new
+            }
+            Replacement::Identity => old,
         }
-        Replacement::Identity => old,
     }
 }
 
 /// Вывод типа для всей программы
 pub fn infer_ast(ast: &Ast, ctx: &mut Context) -> Result<Type, CompilerError> {
-    infer(&ast.program, ctx).map_err(CompilerError::TypingError)
+    let def_map: DefMap = init_definitions(ast, ctx);
+    let mut def_tps: DefTypes = HashMap::new();
+
+    infer(&ast.program, &def_map, &mut def_tps, ctx).map_err(CompilerError::TypingError)
+}
+
+fn init_definitions(ast: &Ast, ctx: &mut Context) -> DefMap {
+    let mut defs = HashMap::new();
+
+    for node in &ast.program {
+        if let AstNode::Define { id, value } = node {
+            ctx.emit_debug(format!("infer definition {}", id));
+            defs.insert(id.clone(), value.clone());
+        }
+    }
+
+    defs
 }
 
 /// Вывод типа для последовательности команд
-fn infer(nodes: &Vec<AstNode>, ctx: &mut Context) -> Result<Type, TypingError> {
-    let mut prog_type = nodes
-        .first()
-        .map(|first| get_node_type(first, &mut ctx.step()))
-        .unwrap_or(Ok(Type::trivial()))?;
+fn infer<'d>(
+    nodes: &'d Vec<AstNode>,
+    def_map: &'d DefMap,
+    def_tps: &'d mut DefTypes,
+    ctx: &mut Context,
+) -> Result<Type, TypingError> {
+    let mut prog_type = match nodes.first() {
+        Some(first) => get_node_type(first, def_map, def_tps, &mut ctx.step()),
+        None => Ok(Type::trivial()),
+    }?;
 
-    for node in nodes.into_iter().skip(1) {
+    for node in nodes.iter().skip(1) {
         ctx.emit_debug(format!("chaining {:?}", node));
-        let node_type = get_node_type(node, &mut ctx.step())?;
+        let node_type = get_node_type(node, def_map, def_tps, &mut ctx.step())?;
         ctx.emit_debug(format!("chain node type: {}", node_type));
         prog_type = chain(&prog_type, &node_type, &mut ctx.step())?;
     }
@@ -116,7 +145,12 @@ fn infer(nodes: &Vec<AstNode>, ctx: &mut Context) -> Result<Type, TypingError> {
 /// cond    : ('a 'a Bool 'S -> 'a 'S)
 /// while   : (('S -> Bool 'R) ('R -> 'S) 'S -> 'S)
 /// ```
-fn get_node_type(node: &AstNode, ctx: &mut Context) -> Result<Type, TypingError> {
+fn get_node_type<'d>(
+    node: &'d AstNode,
+    def_map: &'d DefMap,
+    def_tps: &'d mut DefTypes,
+    ctx: &mut Context,
+) -> Result<Type, TypingError> {
     match node {
         AstNode::BuiltinIdentifier { value } => match value {
             Builtin::Eval => {
@@ -129,27 +163,30 @@ fn get_node_type(node: &AstNode, ctx: &mut Context) -> Result<Type, TypingError>
                 let tail = Term::tail();
                 let bool = Term::bool();
                 let new_tail = Term::tail();
-                let quote = Term::quote(Type::from_inp_out([tail.clone()], [new_tail.clone()]));
+                let var = Term::var();
                 Ok(Type::from_inp_out(
-                    [tail, bool, quote.clone(), quote.clone()],
+                    [tail, bool, var.clone(), var.clone()],
                     [new_tail],
                 ))
             }
             Builtin::Add | Builtin::Sub | Builtin::Mul | Builtin::Div => {
                 let tail = Term::tail();
-                let int = Term::bool();
-                Ok(Type::from_inp_out(
-                    [tail.clone(), int.clone(), int.clone()],
-                    [tail, int.clone()],
-                ))
+                let a = Term::int();
+                let b = Term::int();
+                let c = Term::int();
+                Ok(Type::from_inp_out([tail.clone(), a, b], [tail, c]))
+            }
+            Builtin::Less | Builtin::LessOrEq | Builtin::Great | Builtin::GreatOrEq => {
+                let tail = Term::tail();
+                let a = Term::int();
+                let b = Term::int();
+                let c = Term::bool();
+                Ok(Type::from_inp_out([tail.clone(), a, b], [tail, c]))
             }
             Builtin::Pop => {
                 let tail = Term::tail();
                 let var = Term::var();
-                Ok(Type::from_inp_out(
-                    [tail.clone(), var.clone()],
-                    [tail.clone()],
-                ))
+                Ok(Type::from_inp_out([tail.clone(), var], [tail.clone()]))
             }
             Builtin::Dup => {
                 let tail = Term::tail();
@@ -169,10 +206,7 @@ fn get_node_type(node: &AstNode, ctx: &mut Context) -> Result<Type, TypingError>
                 ))
             }
         },
-        AstNode::Define { id: _, value: _ } => {
-            let tail = Term::tail();
-            Ok(Type::from_inp_out([tail.clone()], [tail]))
-        }
+        AstNode::Define { id: _, value: _ } => Ok(Type::trivial()),
         AstNode::Int { value: _ } => {
             let tail = Term::tail();
             let int = Term::int();
@@ -185,12 +219,25 @@ fn get_node_type(node: &AstNode, ctx: &mut Context) -> Result<Type, TypingError>
             Ok(Type::from_inp_out([tail.clone()], [tail, bool]))
         }
         AstNode::Identifier { value } => {
-            todo!("Тип идентификатора зависит от того, что под этим идентификатором определено")
+            let t = def_tps.get(value);
+
+            if let Some(t) = t {
+                Ok(t.clone_id())
+            } else {
+                let prog = def_map
+                    .get(value)
+                    .ok_or(TypingError::UnknownIdentifier(value.clone()))?;
+
+                let t = infer(prog, def_map, def_tps, &mut ctx.step())?.clone_inp_out();
+                let t_return = t.clone_id();
+                def_tps.insert(value.clone(), t);
+                Ok(t_return)
+            }
         }
         AstNode::Quote { value } => {
             let tail = Term::tail();
             ctx.emit_debug(format!("infer quote {:?}", value));
-            let quote = Term::quote(infer(value, &mut ctx.step())?);
+            let quote = Term::quote(infer(value, def_map, def_tps, &mut ctx.step())?);
 
             Ok(Type::from_inp_out([tail.clone()], [tail, quote])) // T-QUOTE rule
         }

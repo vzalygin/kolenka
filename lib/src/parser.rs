@@ -6,7 +6,7 @@ use nom::{
     combinator::{all_consuming, map},
     error::{ParseError, VerboseError, convert_error},
     multi::{many0, many1, separated_list0},
-    sequence::{delimited, pair, preceded},
+    sequence::{delimited, pair, preceded, terminated},
 };
 
 use crate::{context::Context, error::CompilerError};
@@ -72,6 +72,10 @@ pub(crate) enum Builtin {
     Sub,
     Mul,
     Div,
+    Less,
+    LessOrEq,
+    Great,
+    GreatOrEq,
 
     // stack ops
     Pop,
@@ -122,7 +126,7 @@ fn define<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, AstNod
         preceded(
             tag("define").and(multispace1),
             pair(
-                string,
+                terminated(string, multispace0),
                 delimited(tag("{").and(multispace0), terms, multispace0.and(tag("}"))),
             ),
         ),
@@ -163,10 +167,14 @@ fn builtin<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, AstNo
         alt((
             map(tag("eval"), |_| Builtin::Eval),
             map(tag("if"), |_| Builtin::If),
-            map(tag("add"), |_| Builtin::Add),
-            map(tag("sub"), |_| Builtin::Sub),
-            map(tag("mul"), |_| Builtin::Mul),
-            map(tag("div"), |_| Builtin::Div),
+            map(tag("+"), |_| Builtin::Add),
+            map(tag("-"), |_| Builtin::Sub),
+            map(tag("*"), |_| Builtin::Mul),
+            map(tag("/"), |_| Builtin::Div),
+            map(tag("<"), |_| Builtin::Less),
+            map(tag("<="), |_| Builtin::LessOrEq),
+            map(tag(">"), |_| Builtin::Great),
+            map(tag(">="), |_| Builtin::GreatOrEq),
             map(tag("pop"), |_| Builtin::Pop),
             map(tag("dup"), |_| Builtin::Dup),
             map(tag("swap"), |_| Builtin::Swap),
