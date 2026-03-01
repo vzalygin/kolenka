@@ -2,18 +2,22 @@
 
 use std::collections::HashMap;
 
+use derived_deref::{Deref, DerefMut};
 use thiserror::Error;
 
 use crate::{
-    CompilerError, Context,
-    parser::{Ast, AstNode, Builtin, Program},
-    typing::types::{StackCfg, Term, Type},
+    Context, ProgramId, hir::{DeclMap, DefMap}, parser::{AstNode, Builtin}, typing::{
+        fmt::fmt_vec,
+        structs::{StackCfg, StackVar, Type},
+    }
 };
 
 #[derive(Error, Debug)]
 pub enum TypingError {
     #[error("Incompatible types {0} and {1}")]
-    IncompatibleTypes(Term, Term),
+    IncompatibleTypes(StackVar, StackVar),
+    #[error("Incompatible stacks {0} and {1}")]
+    IncompatibleStacks(StackCfg, StackCfg),
     #[error("Unknown id {0}")]
     UnknownIdentifier(String),
 }
@@ -21,111 +25,73 @@ pub enum TypingError {
 /// Представление ограничения
 ///
 /// Вывод типов связан согласованием конфигураций стека между командами. Данный тип описывает такие требования согласования.
-#[derive(Debug)]
-enum Constraint {
+#[derive(Debug, Clone)]
+pub(crate) enum Constraint {
     /// Требование унификации типов
-    Unification(Term, Term),
+    Unification(StackVar, StackVar),
     /// Требование согласования размеров стека
     TailExtension(StackCfg, StackCfg),
+    // TODO склеить в один инвариант
 }
 
-#[derive(Debug)]
-enum Replacement {
+impl Constraint {
+    fn tail_extension(lhs: impl Into<StackCfg>, rhs: impl Into<StackCfg>) -> Constraint {
+        Constraint::TailExtension(lhs.into(), rhs.into())
+    }
+}
+
+#[derive(Debug, Clone)]
+pub(crate) enum Replacement {
     Stack(StackCfg, StackCfg),
     Identity, // TODO убрать этот инвариант, тк он бесполезен
 }
-
-type DefMap = HashMap<String, Program>;
-
-type DefTypes = HashMap<String, Type>;
 
 impl Replacement {
     fn stack(from: StackCfg, to: StackCfg) -> Replacement {
         Replacement::Stack(from, to)
     }
 
-    fn term(from: Term, to: Term) -> Replacement {
-        Replacement::Stack(vec![from], vec![to])
+    fn term(from: StackVar, to: StackVar) -> Replacement {
+        Replacement::Stack(vec![from].into(), vec![to].into())
     }
 }
 
-impl Type {
-    fn apply_replacement(self, replacement: &Replacement) -> Type {
-        Type::new(
-            self.seq
-                .into_iter()
-                .map(|stack_cfg| Type::stack_cfg_apply_replacement(stack_cfg, replacement))
-                .collect::<Vec<_>>(),
-        )
-    }
-
-    fn stack_cfg_apply_replacement(old: StackCfg, replacement: &Replacement) -> StackCfg {
-        match replacement {
-            Replacement::Stack(from, to) => {
-                let mut new: StackCfg = vec![];
-                let mut i = 0;
-
-                while i < old.len() {
-                    if old[i..].starts_with(from) {
-                        let mut to = to.clone();
-                        new.append(&mut to);
-                        i += from.len();
-                    } else {
-                        let old = old[i].clone();
-                        if let Term::Quote { inner } = old {
-                            new.push(Term::quote(inner.apply_replacement(replacement)));
-                        } else {
-                            new.push(old);
-                        }
-                        i += 1;
-                    }
-                }
-
-                new
-            }
-            Replacement::Identity => old,
-        }
-    }
-}
+#[derive(Clone, Debug, Deref, DerefMut)]
+pub(crate) struct TypesMap(pub(crate) HashMap<ProgramId, Type>);
 
 /// Вывод типа для всей программы
-pub fn infer_ast(ast: &Ast, ctx: &mut Context) -> Result<Type, CompilerError> {
-    let def_map: DefMap = init_definitions(ast, ctx);
-    let mut def_tps: DefTypes = HashMap::new();
+pub(crate) fn infer_definitions(decls: &DeclMap, defs: &mut DefMap, ctx: &mut Context) -> Result<TypesMap, TypingError> {
+    let mut def_types: TypesMap = TypesMap(HashMap::new());
 
-    infer(&ast.program, &def_map, &mut def_tps, ctx).map_err(CompilerError::TypingError)
-}
-
-fn init_definitions(ast: &Ast, ctx: &mut Context) -> DefMap {
-    let mut defs = HashMap::new();
-
-    for node in &ast.program {
-        if let AstNode::Define { id, value } = node {
-            ctx.emit_debug(format!("infer definition {}", id));
-            defs.insert(id.clone(), value.clone());
+    for (id, program) in defs.iter() {
+        if !def_types.contains_key(id) {
+            let t = infer(program, decls, defs, &mut def_types, ctx)?;
+            def_types.insert(*id, t);
         }
     }
 
-    defs
+    Ok(def_types)
 }
 
 /// Вывод типа для последовательности команд
 fn infer<'d>(
     nodes: &'d Vec<AstNode>,
+    decl_map: &'d DeclMap,
     def_map: &'d DefMap,
-    def_tps: &'d mut DefTypes,
+    def_tps: &'d mut TypesMap,
     ctx: &mut Context,
 ) -> Result<Type, TypingError> {
     let mut prog_type = match nodes.first() {
-        Some(first) => get_node_type(first, def_map, def_tps, &mut ctx.step()),
+        Some(first) => get_node_type(first, decl_map, def_map, def_tps, &mut ctx.step()),
         None => Ok(Type::trivial()),
     }?;
 
     for node in nodes.iter().skip(1) {
         ctx.emit_debug(format!("chaining {:?}", node));
-        let node_type = get_node_type(node, def_map, def_tps, &mut ctx.step())?;
+        let node_type = get_node_type(node, decl_map, def_map, def_tps, &mut ctx.step())?;
         ctx.emit_debug(format!("chain node type: {}", node_type));
         prog_type = chain(&prog_type, &node_type, &mut ctx.step())?;
+        ctx.emit_debug("===");
     }
 
     ctx.emit_debug(format!("resulted type {}", prog_type));
@@ -147,99 +113,145 @@ fn infer<'d>(
 /// ```
 fn get_node_type<'d>(
     node: &'d AstNode,
+    decl_map: &'d DeclMap,
     def_map: &'d DefMap,
-    def_tps: &'d mut DefTypes,
+    def_types: &'d mut TypesMap,
     ctx: &mut Context,
 ) -> Result<Type, TypingError> {
     match node {
-        AstNode::BuiltinIdentifier { value } => match value {
+        AstNode::BuiltinIdentifier { id: _, value } => match value {
             Builtin::Eval => {
-                let tail = Term::tail();
-                let new_tail = Term::tail();
-                let quote = Term::quote(Type::from_inp_out([tail.clone()], [new_tail.clone()]));
+                let tail = StackVar::tail();
+                let new_tail = StackVar::tail();
+                let quote = StackVar::quote(Type::from_inp_out([tail.clone()], [new_tail.clone()]));
                 Ok(Type::from_inp_out([tail, quote], [new_tail]))
             }
             Builtin::If => {
-                let tail = Term::tail();
-                let bool = Term::bool();
-                let new_tail = Term::tail();
-                let var = Term::var();
+                let tail = StackVar::tail();
+                let bool = StackVar::bool();
+                let new_tail = StackVar::tail();
+                let quote = StackVar::quote(Type::from_inp_out([tail.clone()], [new_tail.clone()]));
                 Ok(Type::from_inp_out(
-                    [tail, bool, var.clone(), var.clone()],
+                    [tail, bool, quote.clone(), quote.clone()],
                     [new_tail],
                 ))
             }
+            Builtin::While => {
+                let tail = StackVar::tail();
+                let in_tail = StackVar::tail();
+                let bool = StackVar::bool();
+                let cond_quote = StackVar::quote(Type::from_inp_out([tail.clone()], [in_tail.clone(), bool]));
+                let body_quote = StackVar::quote(Type::from_inp_out([in_tail], [tail.clone()]));
+                Ok(Type::from_inp_out(
+                    [tail.clone(), cond_quote, body_quote],
+                    [tail]
+                ))
+            }
             Builtin::Add | Builtin::Sub | Builtin::Mul | Builtin::Div => {
-                let tail = Term::tail();
-                let a = Term::int();
-                let b = Term::int();
-                let c = Term::int();
+                let tail = StackVar::tail();
+                let a = StackVar::int();
+                let b = StackVar::int();
+                let c = StackVar::int();
                 Ok(Type::from_inp_out([tail.clone(), a, b], [tail, c]))
             }
             Builtin::Less | Builtin::LessOrEq | Builtin::Great | Builtin::GreatOrEq => {
-                let tail = Term::tail();
-                let a = Term::int();
-                let b = Term::int();
-                let c = Term::bool();
+                let tail = StackVar::tail();
+                let a = StackVar::int();
+                let b = StackVar::int();
+                let c = StackVar::bool();
                 Ok(Type::from_inp_out([tail.clone(), a, b], [tail, c]))
             }
             Builtin::Pop => {
-                let tail = Term::tail();
-                let var = Term::var();
+                let tail = StackVar::tail();
+                let var = StackVar::var();
                 Ok(Type::from_inp_out([tail.clone(), var], [tail.clone()]))
             }
             Builtin::Dup => {
-                let tail = Term::tail();
-                let var = Term::var();
+                let tail = StackVar::tail();
+                let var = StackVar::var();
                 Ok(Type::from_inp_out(
                     [tail.clone(), var.clone()],
                     [tail, var.clone(), var],
                 ))
             }
             Builtin::Swap => {
-                let tail = Term::tail();
-                let lhs = Term::var();
-                let rhs = Term::var();
+                let tail = StackVar::tail();
+                let lhs = StackVar::var();
+                let rhs = StackVar::var();
                 Ok(Type::from_inp_out(
                     [tail.clone(), lhs.clone(), rhs.clone()],
                     [tail, rhs, lhs],
                 ))
             }
+            Builtin::Quote => {
+                let tail = StackVar::tail();
+                let tail_in = StackVar::tail();
+                let var = StackVar::var();
+                let var_quoted = StackVar::quote(Type::from_inp_out([tail_in.clone()], [tail_in.clone(), var.clone()]));
+                Ok(Type::from_inp_out(
+                    [tail.clone(), var],
+                    [tail, var_quoted]
+                ))
+            },
+            Builtin::Compose => {
+                let tail = StackVar::tail();
+                let from = StackVar::tail();
+                let mid = StackVar::tail();
+                let to = StackVar::tail();
+                let quote1 = StackVar::quote(Type::from_inp_out([from.clone()], [mid.clone()]));
+                let quote2 = StackVar::quote(Type::from_inp_out([mid], [to.clone()]));
+                let quote_res = StackVar::quote(Type::from_inp_out([from], [to]));
+                Ok(Type::from_inp_out(
+                    [tail.clone(), quote1, quote2],
+                    [tail, quote_res]
+                ))
+            },
         },
-        AstNode::Define { id: _, value: _ } => Ok(Type::trivial()),
-        AstNode::Int { value: _ } => {
-            let tail = Term::tail();
-            let int = Term::int();
+        AstNode::Define { id: _, name: _, value: _ } => Ok(Type::trivial()),
+        AstNode::Int { id: _, value: _ } => {
+            let tail = StackVar::tail();
+            let int = StackVar::int();
             Ok(Type::from_inp_out([tail.clone()], [tail, int]))
         }
-        AstNode::Bool { value: _ } => {
+        AstNode::Bool { id: _, value: _ } => {
             // TODO можно упростить с Int
-            let tail = Term::tail();
-            let bool = Term::bool();
+            let tail = StackVar::tail();
+            let bool = StackVar::bool();
             Ok(Type::from_inp_out([tail.clone()], [tail, bool]))
         }
-        AstNode::Identifier { value } => {
-            let t = def_tps.get(value);
+        AstNode::Identifier { id: _, value } => {
+
+            let prog_id = decl_map
+                .get(value)
+                .ok_or(TypingError::UnknownIdentifier(value.clone()))?;
+
+            let t = def_types.get(prog_id);
 
             if let Some(t) = t {
                 Ok(t.clone_id())
             } else {
+                // TODO нужно ли тут клонировать программу с изменением id? Вроде как да, потому что надо гарантировать полиморфизм
+                // Можно множить на каждый вызов новое "определение", а потом схлопывать одинаковые определения.
+                // Можно ли отложить на более поздние этапы? Вопрос в том, до какого момента код еще может быть полиморфным.
+                // Пока думаю, что лучше попозже заиметь мапу k: (ProgramId, Vec<VarType>, Vec<VarType>), v: ... с неполиморфными определениями.
                 let prog = def_map
-                    .get(value)
+                    .get(prog_id)
                     .ok_or(TypingError::UnknownIdentifier(value.clone()))?;
 
-                let t = infer(prog, def_map, def_tps, &mut ctx.step())?.clone_inp_out();
+                let t = infer(prog, decl_map, def_map, def_types, &mut ctx.step())?.clone_inp_out();
                 let t_return = t.clone_id();
-                def_tps.insert(value.clone(), t);
+                def_types.insert(*prog_id, t);
                 Ok(t_return)
             }
         }
-        AstNode::Quote { value } => {
-            let tail = Term::tail();
+        AstNode::Quote { id: _, value } => {
+            let tail = StackVar::tail();
             ctx.emit_debug(format!("infer quote {:?}", value));
-            let quote = Term::quote(infer(value, def_map, def_tps, &mut ctx.step())?);
+            let quote_type = infer(value, decl_map, def_map, def_types, &mut ctx.step())?;
+            let quote_inner_id = quote_type.id;
+            let quote = StackVar::quote(quote_type);
 
-            Ok(Type::from_inp_out([tail.clone()], [tail, quote])) // T-QUOTE rule
+            Ok(Type::from_id_inp_out(quote_inner_id, [tail.clone()], [tail, quote])) // T-QUOTE rule
         }
     }
 }
@@ -251,21 +263,43 @@ fn get_node_type<'d>(
 /// В процессе сопоставления генерируются ограничения, для которых затем ищется наиболее общее решение -- унификация. Если решение не существует, то имеет место ошибка типизации.
 fn chain(lhs: &Type, rhs: &Type, ctx: &mut Context) -> Result<Type, TypingError> {
     let (mut lhs, mut rhs) = (lhs.clone(), rhs.clone());
+    ctx.emit_debug(format!("types lhs {} rhs {}", lhs, rhs));
 
-    let mut restrictions = constrain_chain(&lhs, &rhs, &mut ctx.step());
+    let mut constraints: Vec<Constraint> = constrain_chain(&lhs, &rhs, &mut ctx.step());
+    let mut replacements: Vec<Replacement> = vec![];
+    ctx.emit_debug(format!("constraints {}", fmt_vec(&constraints)));
 
-    while !restrictions.is_empty() {
-        ctx.emit_debug(format!("types lhs {} rhs {}", lhs, rhs));
-        ctx.emit_debug(format!("restrictions {:?}", restrictions));
-        for restriction in restrictions {
-            let replacement = chain_solve(restriction, &mut ctx.step())?;
-            ctx.emit_debug(format!("replacement {:?}", replacement));
-            lhs = lhs.apply_replacement(&replacement);
-            rhs = rhs.apply_replacement(&replacement);
+    {
+        let ctx = &mut ctx.step();
+        while !constraints.is_empty() {
+            let constraint = constraints.pop().unwrap();
+            ctx.emit_debug(format!("solve constraint {}", constraint));
+            let replacement = chain_solve(constraint)?;
+            ctx.emit_debug(format!("by replacement {}", replacement));
+            let mut new_constraints: Vec<Constraint> = vec![];
+            for constraint in &constraints {
+                let mut constraints = constraint
+                    .clone()
+                    .apply_replacement(&replacement, &mut ctx.step());
+                // ctx.emit_debug(format!(
+                //     "replace constraint from {} to {}",
+                //     constraint, fmt_vec(&constraints)
+                // ));
+                new_constraints.append(&mut constraints);
+            }
+            replacements.push(replacement);
+            constraints = new_constraints;
         }
-        ctx.emit_debug(format!("applied types lhs {} rhs {}", lhs, rhs));
-        restrictions = constrain_chain(&lhs, &rhs, &mut ctx.step());
     }
+
+    ctx.emit_debug(format!("replacements {}", fmt_vec(&replacements)));
+
+    for replacement in replacements {
+        lhs = lhs.apply_replacement(&replacement);
+        rhs = rhs.apply_replacement(&replacement);
+    }
+
+    ctx.emit_debug(format!("chained types lhs {} rhs {}", lhs, rhs));
 
     Ok(lhs.append(rhs.seq.into_iter().skip(1)))
 }
@@ -281,7 +315,7 @@ fn constrain_chain(lhs: &Type, rhs: &Type, ctx: &mut Context) -> Vec<Constraint>
 
 /// Поиск ограничений эквивалентности
 ///
-/// Эквивалетность типов -- вход и выход первого типа совпадают с входом и выходом второго типа.
+/// Эквивалентность типов -- вход и выход первого типа совпадают с входом и выходом второго типа.
 fn constrain_equivalence(lhs: &Type, rhs: &Type, ctx: &mut Context) -> Vec<Constraint> {
     let (lhs_inp, lhs_out) = lhs.inp_out();
     let (rhs_inp, rhs_out) = rhs.inp_out();
@@ -307,8 +341,8 @@ fn constrain(lhs: &StackCfg, rhs: &StackCfg, ctx: &mut Context) -> Vec<Constrain
 
         if lhs_has_next == rhs_has_next {
             if lhs != rhs {
-                if let Term::Quote { inner: lhs } = lhs
-                    && let Term::Quote { inner: rhs } = rhs
+                if let StackVar::Quote { inner: lhs } = lhs
+                    && let StackVar::Quote { inner: rhs } = rhs
                 {
                     constraints.append(&mut constrain_equivalence(lhs, rhs, &mut ctx.step()));
                 } else {
@@ -316,22 +350,22 @@ fn constrain(lhs: &StackCfg, rhs: &StackCfg, ctx: &mut Context) -> Vec<Constrain
                 }
             }
         } else if !rhs_has_next {
-            let lhs: Vec<Term> = vec![lhs.clone()]
+            let lhs: Vec<StackVar> = vec![lhs.clone()]
                 .into_iter()
                 .chain(lhs_iter.cloned())
                 .rev()
                 .collect();
-            let rhs: Vec<Term> = vec![rhs.clone()];
-            constraints.push(Constraint::TailExtension(lhs, rhs));
+            let rhs: Vec<StackVar> = vec![rhs.clone()];
+            constraints.push(Constraint::tail_extension(lhs, rhs));
             break;
         } else if !lhs_has_next {
-            let lhs: Vec<Term> = vec![lhs.clone()];
-            let rhs: Vec<Term> = vec![rhs.clone()]
+            let lhs: Vec<StackVar> = vec![lhs.clone()];
+            let rhs: Vec<StackVar> = vec![rhs.clone()]
                 .into_iter()
                 .chain(rhs_iter.cloned())
                 .rev()
                 .collect();
-            constraints.push(Constraint::TailExtension(lhs, rhs));
+            constraints.push(Constraint::tail_extension(lhs, rhs));
             break;
         }
     }
@@ -343,14 +377,13 @@ fn constrain(lhs: &StackCfg, rhs: &StackCfg, ctx: &mut Context) -> Vec<Constrain
 ///
 /// 1. Если два типа, то выбирается наиболее конкретный (пример, Int и Var -> Int)
 /// 2. Если конфигурации разного размера, то выбирается наиболее длинная. По сути -- сводится к п.1, если считать, что наиболее общий == наиболее длинный.
-fn chain_solve(restriction: Constraint, ctx: &mut Context) -> Result<Replacement, TypingError> {
-    ctx.emit_debug(format!("unification for {:?}", restriction));
+fn chain_solve(restriction: Constraint) -> Result<Replacement, TypingError> {
     match restriction {
         Constraint::Unification(lhs, rhs) => {
             // Пока правила достаточно простые, reduce всегда возвращает `Ok(to)`, если сведение возможно
             let r_lhs = chain_reduce(&lhs, &rhs).is_some();
             let r_rhs = chain_reduce(&rhs, &lhs).is_some();
-            ctx.emit_debug(format!("reduce_lhs {} reduce_rhs {}", r_lhs, r_rhs));
+            // ctx.emit_debug(format!("reduce_lhs {} reduce_rhs {}", r_lhs, r_rhs));
             // Приоритетно менять правую часть, чтобы не возникло циклов
             // Но вообще надо бы подумать, действительно ли никак не решить цикл без этого странного необходимого порядка
             if r_rhs {
@@ -362,6 +395,10 @@ fn chain_solve(restriction: Constraint, ctx: &mut Context) -> Result<Replacement
             }
         }
         Constraint::TailExtension(lhs, rhs) => {
+            if lhs.first() == rhs.first() {
+                return Err(TypingError::IncompatibleStacks(lhs, rhs));
+            }
+
             if lhs.len() < rhs.len() {
                 Ok(Replacement::stack(lhs, rhs))
             } else if lhs.len() > rhs.len() {
@@ -374,30 +411,94 @@ fn chain_solve(restriction: Constraint, ctx: &mut Context) -> Result<Replacement
 }
 
 /// Если переменную `from` можно свести к `to` в контексте сцепки типов, то функция возвращает рельтат сведения
-fn chain_reduce<'t>(from: &'t Term, to: &'t Term) -> Option<&'t Term> {
+fn chain_reduce<'t>(from: &'t StackVar, to: &'t StackVar) -> Option<&'t StackVar> {
     match (from, to) {
         // Стек можно свести только к другому стеку
-        (Term::Tail(_), Term::Tail(_)) => Option::Some(to),
+        (StackVar::Tail(_), StackVar::Tail(_)) => Option::Some(to),
 
         // Переменную можно свести к любому более конкретному типу
-        (Term::Var(_), Term::Tail(_)) => Option::Some(to),
-        (Term::Var(_), Term::Var(_)) => Option::Some(to),
-        (Term::Var(_), Term::Quote { inner: _ }) => Option::Some(to),
-        (Term::Var(_), Term::Int(_)) => Option::Some(to),
-        (Term::Var(_), Term::Bool(_)) => Option::Some(to),
+        (StackVar::Var(_), StackVar::Tail(_)) => Option::Some(to),
+        (StackVar::Var(_), StackVar::Var(_)) => Option::Some(to),
+        (StackVar::Var(_), StackVar::Quote { inner: _ }) => Option::Some(to),
+        (StackVar::Var(_), StackVar::Int(_)) => Option::Some(to),
+        (StackVar::Var(_), StackVar::Bool(_)) => Option::Some(to),
 
         // Цитату можно свести только к другой цитате
-        (Term::Quote { inner: _ }, Term::Quote { inner: _ }) => Option::Some(to),
+        (StackVar::Quote { inner: _ }, StackVar::Quote { inner: _ }) => Option::Some(to),
 
         // Число можно свести к числу и булю
-        (Term::Int(_), Term::Int(_)) => Option::Some(to),
-        (Term::Int(_), Term::Bool(_)) => Option::Some(to),
+        (StackVar::Int(_), StackVar::Int(_)) => Option::Some(to),
+        (StackVar::Int(_), StackVar::Bool(_)) => Option::Some(to),
 
-        // Буль можно свести к булю и числу
-        (Term::Bool(_), Term::Int(_)) => Option::Some(to),
-        (Term::Bool(_), Term::Bool(_)) => Option::Some(to),
+        // Буль можно свести к булю
+        (StackVar::Bool(_), StackVar::Bool(_)) => Option::Some(to),
 
         // В остальных случаях свести нельзя
         _ => Option::None,
+    }
+}
+
+impl Constraint {
+    fn apply_replacement(self, replacement: &Replacement, ctx: &mut Context) -> Vec<Constraint> {
+        match replacement {
+            Replacement::Stack(_, _) => {
+                let (lhs, rhs) = match self {
+                    Constraint::Unification(lhs, rhs) => {
+                        (StackCfg::new([lhs]), StackCfg::new([rhs]))
+                    }
+                    Constraint::TailExtension(lhs, rhs) => (lhs, rhs),
+                };
+
+                constrain(
+                    &stack_cfg_apply_replacement(lhs, replacement),
+                    &stack_cfg_apply_replacement(rhs, replacement),
+                    ctx,
+                )
+            }
+            Replacement::Identity => vec![self],
+        }
+    }
+}
+
+impl Type {
+    fn apply_replacement(self, replacement: &Replacement) -> Type {
+        Type::new(
+            self.id,
+            self.seq
+                .into_iter()
+                .map(|stack_cfg| stack_cfg_apply_replacement(stack_cfg, replacement))
+                .collect::<Vec<_>>(),
+        )
+    }
+}
+
+fn stack_cfg_apply_replacement(old: StackCfg, replacement: &Replacement) -> StackCfg {
+    match replacement {
+        Replacement::Stack(from, to) => {
+            let mut new: StackCfg = StackCfg::empty();
+            let mut i = 0;
+
+            while i < old.len() {
+                if old[i..].starts_with(&from) {
+                    let mut to = to.clone();
+                    new.append(&mut to);
+                    i += from.len();
+                } else {
+                    let old = old[i].clone();
+                    if let StackVar::Quote { inner } = &old {
+                        // FIXME надо делать замены внутри цитат?
+                        // Кажется, что нет
+                        // new.push(Term::quote(inner.apply_replacement(replacement)));
+                        new.push(old);
+                    } else {
+                        new.push(old);
+                    }
+                    i += 1;
+                }
+            }
+
+            new
+        }
+        Replacement::Identity => old,
     }
 }

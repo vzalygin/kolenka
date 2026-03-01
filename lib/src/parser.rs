@@ -1,3 +1,4 @@
+use derived_deref::{Deref, DerefMut};
 use nom::{
     Finish, IResult, Parser,
     branch::alt,
@@ -9,7 +10,7 @@ use nom::{
     sequence::{delimited, pair, preceded, terminated},
 };
 
-use crate::{context::Context, error::CompilerError};
+use crate::{ProgramId, context::Context, error::CompilerError, id::OpId};
 
 /// EBNF
 ///
@@ -45,19 +46,24 @@ pub struct Ast {
     pub(crate) program: Program,
 }
 
-pub(crate) type Program = Vec<AstNode>;
+#[derive(Debug, Clone, Deref, DerefMut)]
+pub(crate) struct Program {
+    pub(crate) id: ProgramId,
+    #[target]
+    pub(crate) terms: Vec<AstNode>,
+}
 
 #[derive(Debug, Clone)]
 pub(crate) enum AstNode {
     // types
-    Int { value: i32 },
-    Bool { value: bool },
+    Int { id: OpId, value: i32 },
+    Bool { id: OpId, value: bool },
 
     // prog
-    BuiltinIdentifier { value: Builtin },
-    Identifier { value: String },
-    Quote { value: Program },
-    Define { id: String, value: Program },
+    BuiltinIdentifier { id: OpId, value: Builtin },
+    Identifier { id: OpId, value: String },
+    Quote { id: OpId, value: Program },
+    Define { id: OpId, name: String, value: Program },
     // types ?
 }
 
@@ -66,6 +72,7 @@ pub(crate) enum Builtin {
     // control
     Eval,
     If,
+    While,
 
     // math ops
     Add,
@@ -81,6 +88,8 @@ pub(crate) enum Builtin {
     Pop,
     Dup,
     Swap,
+    Quote,
+    Compose,
 }
 
 pub fn parse_source(input: &str, ctx: &mut Context) -> Result<Ast, CompilerError> {
@@ -102,7 +111,7 @@ pub fn parse_source(input: &str, ctx: &mut Context) -> Result<Ast, CompilerError
 fn program<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, Ast, E> {
     map(
         all_consuming(delimited(multispace0, terms, multispace0)),
-        |terms| Ast { program: terms },
+        |terms| Ast { program: Program { id: ProgramId::new(), terms } },
     )(input)
 }
 
@@ -117,7 +126,7 @@ fn term<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, AstNode,
 fn quotation<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, AstNode, E> {
     map(
         delimited(tag("[").and(multispace0), terms, multispace0.and(tag("]"))),
-        |inner| AstNode::Quote { value: inner },
+        |inner| AstNode::Quote { id: OpId::new(), value: Program { id: ProgramId::new(), terms: inner } },
     )(input)
 }
 
@@ -131,14 +140,15 @@ fn define<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, AstNod
             ),
         ),
         |(name, definition)| AstNode::Define {
-            id: name,
-            value: definition,
+            id: OpId::new(),
+            name,
+            value: Program { id: ProgramId::new(), terms: definition },
         },
     )(input)
 }
 
 fn identifier<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, AstNode, E> {
-    map(string, |id: String| AstNode::Identifier { value: id })(input)
+    map(string, |id: String| AstNode::Identifier { id: OpId::new(), value: id })(input)
 }
 
 fn string<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, String, E> {
@@ -151,14 +161,14 @@ fn string<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, String
 fn num<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, AstNode, E> {
     map(take_while1(|c: char| is_digit(c as u8)), |number: &str| {
         let number = number.parse::<i32>().unwrap();
-        AstNode::Int { value: number }
+        AstNode::Int { id: OpId::new(), value: number }
     })(input)
 }
 
 fn bool<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, AstNode, E> {
     alt((
-        map(tag("true"), |_| AstNode::Bool { value: true }),
-        map(tag("false"), |_| AstNode::Bool { value: false }),
+        map(tag("true"), |_| AstNode::Bool { id: OpId::new(), value: true }),
+        map(tag("false"), |_| AstNode::Bool { id: OpId::new(), value: false }),
     ))(input)
 }
 
@@ -167,6 +177,9 @@ fn builtin<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, AstNo
         alt((
             map(tag("eval"), |_| Builtin::Eval),
             map(tag("if"), |_| Builtin::If),
+            map(tag("while"), |_| Builtin::While),
+            map(tag("quote"), |_| Builtin::Quote),
+            map(tag("compose"), |_| Builtin::Compose),
             map(tag("+"), |_| Builtin::Add),
             map(tag("-"), |_| Builtin::Sub),
             map(tag("*"), |_| Builtin::Mul),
@@ -179,7 +192,7 @@ fn builtin<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, AstNo
             map(tag("dup"), |_| Builtin::Dup),
             map(tag("swap"), |_| Builtin::Swap),
         )),
-        |builtin| AstNode::BuiltinIdentifier { value: builtin },
+        |builtin| AstNode::BuiltinIdentifier { id: OpId::new(), value: builtin },
     )(input)
 }
 

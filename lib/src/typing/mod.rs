@@ -2,7 +2,12 @@
 
 mod fmt;
 mod inference;
-mod types;
+mod structs;
 
-pub use inference::{TypingError, infer_ast};
-pub use types::Type;
+pub use inference::TypingError;
+pub use structs::{Type, StackCfg};
+
+pub(crate) use crate::typing::{
+    inference::{TypesMap, infer_definitions},
+    structs::StackVar,
+};

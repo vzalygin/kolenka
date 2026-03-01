@@ -18,6 +18,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "derived-deref"
+version = "2.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "805ef2023ccd65425743a91ecd11fc020979a0b01921db3104fb606d18a7b43e"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
 name = "equivalent"
 version = "1.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -63,6 +74,7 @@ name = "lib"
 version = "0.1.0"
 dependencies = [
  "colored",
+ "derived-deref",
  "nom",
  "thiserror",
  "wasm-encoder",
