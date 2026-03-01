@@ -1,34 +1,48 @@
 mod wasm;
 
 use colored::Colorize;
-use std::io::{self, Write};
+use std::{
+    env,
+    io::{self, Write},
+};
 
 use lib::{CompilerError, Context, LogLevel, infer_ast, parse_source};
 
 fn main() {
-    wasm::module();
+    let args: Vec<String> = env::args().collect();
+    if args.len() == 2 {
+        compile_void(args[1].clone());
+        return;
+    }
+
+    // wasm::module();
     loop {
         print!("{} ", "ready :>".cyan());
         io::stdout().flush().unwrap();
         let mut input = String::new();
         io::stdin().read_line(&mut input).expect("read line error");
 
-        match compile(input) {
-            Ok(_) => println!("{}", "ok".green()),
-            Err(e) => println!("{} {}", "error".red(), e),
-        }
+        compile_void(input);
+    }
+}
+
+fn compile_void(source: String) {
+    match compile(source) {
+        Ok(_) => println!("{}", "ok".green()),
+        Err(e) => println!("{} {}", "error".red(), e),
     }
 }
 
 fn compile(source: String) -> Result<(), CompilerError> {
     let mut parser_stdout = std::io::stdout();
-    let mut parser_context = Context::new(&mut parser_stdout, LogLevel::Debug);
     let mut typing_stdout = std::io::stdout();
+    let mut parser_context = Context::new(&mut parser_stdout, LogLevel::Debug);
     let mut typing_context = Context::new(&mut typing_stdout, LogLevel::Debug);
 
     let ast = parse_source(&source, &mut parser_context)?;
 
     let prog_type = infer_ast(&ast, &mut typing_context)?;
+    println!("program type: {}", prog_type);
 
     Ok(())
 }

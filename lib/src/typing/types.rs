@@ -2,6 +2,7 @@
 
 use std::{
     collections::HashMap,
+    ops::{Deref, DerefMut},
     sync::atomic::{AtomicU32, Ordering},
 };
 
@@ -12,7 +13,8 @@ pub struct Type {
     pub(crate) seq: Vec<StackCfg>,
 }
 
-pub(crate) type StackCfg = Vec<Term>;
+#[derive(PartialEq, Eq, Hash, Clone, Debug)]
+pub struct StackCfg(Vec<Term>);
 
 #[derive(PartialEq, Eq, Hash, Clone, Debug)]
 pub enum Term {
@@ -46,7 +48,7 @@ impl Type {
     /// Тип тривиальной программы -- программы, которая ничего не делает
     pub(crate) fn trivial() -> Type {
         let stack = Term::tail();
-        Type::from_inp_out([stack.clone()], [stack])
+        Type::from_inp_out(StackCfg::new([stack.clone()]), StackCfg::new([stack]))
     }
 
     pub(crate) fn inp_out(&self) -> (&StackCfg, &StackCfg) {
@@ -65,25 +67,61 @@ impl Type {
             .seq
             .iter()
             .map(|stack_cfg| {
-                stack_cfg
-                    .iter()
-                    .map(|term| {
-                        replacements
-                            .entry(term.clone())
-                            .or_insert_with(|| match term {
-                                Term::Tail(_) => Term::tail(),
-                                Term::Var(_) => Term::var(),
-                                Term::Quote { inner } => Term::quote(inner.clone_id()),
-                                Term::Int(_) => Term::int(),
-                                Term::Bool(_) => Term::bool(),
-                            })
-                            .clone()
-                    })
-                    .collect()
+                StackCfg::new(
+                    stack_cfg
+                        .0
+                        .iter()
+                        .map(|term| {
+                            replacements
+                                .entry(term.clone())
+                                .or_insert_with(|| match term {
+                                    Term::Tail(_) => Term::tail(),
+                                    Term::Var(_) => Term::var(),
+                                    Term::Quote { inner } => Term::quote(inner.clone_id()),
+                                    Term::Int(_) => Term::int(),
+                                    Term::Bool(_) => Term::bool(),
+                                })
+                                .clone()
+                        })
+                        .collect::<Vec<Term>>(),
+                )
             })
             .collect();
 
         Type::new(new_seq)
+    }
+}
+
+impl StackCfg {
+    pub(crate) fn new(v: impl Into<Vec<Term>>) -> StackCfg {
+        StackCfg(v.into())
+    }
+
+    pub(crate) fn empty() -> StackCfg {
+        StackCfg::new([])
+    }
+}
+
+impl<S> From<S> for StackCfg
+where
+    S: Into<Vec<Term>>,
+{
+    fn from(value: S) -> Self {
+        StackCfg::new(value.into())
+    }
+}
+
+impl Deref for StackCfg {
+    type Target = Vec<Term>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl DerefMut for StackCfg {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
     }
 }
 

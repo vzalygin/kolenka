@@ -1,14 +1,12 @@
-use std::{collections::HashMap, fs::File, io::Write};
+//! Модуль с обертками над Wasm
+
+use std::collections::HashMap;
 
 use wasm_encoder::{
     CodeSection, DataSection, ElementSection, EntityType, ExportKind, ExportSection, Function,
     FunctionSection, GlobalSection, ImportSection, MemorySection, Module, TableSection,
     TypeSection, ValType,
 };
-
-const STD_MODULE: &str = "kolenka_std";
-const STD_READ_I32: &str = "read_i32";
-const STD_PRINT_I32: &str = "print_i32";
 
 struct WasmModule {
     types: TypeSection,
@@ -124,26 +122,4 @@ impl WasmType {
             result: result.into(),
         }
     }
-}
-
-pub(crate) fn module() {
-    let mut m = WasmModule::new();
-
-    let read_i32 = m.import_function(STD_MODULE, STD_READ_I32, WasmType::new([], [ValType::I32]));
-    let print_i32 = m.import_function(STD_MODULE, STD_PRINT_I32, WasmType::new([ValType::I32], []));
-
-    let mut add_function = Function::new([]);
-    add_function
-        .instructions()
-        .call(read_i32)
-        .i32_const(1)
-        .i32_add()
-        .call(print_i32)
-        .end();
-    m.function_exported("_start", WasmType::new([], []), add_function);
-
-    let wasm_bytes = m.finish();
-
-    let mut file = File::create("test.wasm").unwrap();
-    file.write_all(&wasm_bytes).unwrap();
 }

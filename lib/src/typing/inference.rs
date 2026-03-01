@@ -7,13 +7,18 @@ use thiserror::Error;
 use crate::{
     CompilerError, Context,
     parser::{Ast, AstNode, Builtin, Program},
-    typing::types::{StackCfg, Term, Type},
+    typing::{
+        fmt::fmt_vec,
+        types::{StackCfg, Term, Type},
+    },
 };
 
 #[derive(Error, Debug)]
 pub enum TypingError {
     #[error("Incompatible types {0} and {1}")]
     IncompatibleTypes(Term, Term),
+    #[error("Incompatible stacks {0} and {1}")]
+    IncompatibleStacks(StackCfg, StackCfg),
     #[error("Unknown id {0}")]
     UnknownIdentifier(String),
 }
@@ -21,16 +26,17 @@ pub enum TypingError {
 /// Представление ограничения
 ///
 /// Вывод типов связан согласованием конфигураций стека между командами. Данный тип описывает такие требования согласования.
-#[derive(Debug)]
-enum Constraint {
+#[derive(Debug, Clone)]
+pub(crate) enum Constraint {
     /// Требование унификации типов
     Unification(Term, Term),
     /// Требование согласования размеров стека
     TailExtension(StackCfg, StackCfg),
+    // TODO склеить в один инвариант
 }
 
-#[derive(Debug)]
-enum Replacement {
+#[derive(Debug, Clone)]
+pub(crate) enum Replacement {
     Stack(StackCfg, StackCfg),
     Identity, // TODO убрать этот инвариант, тк он бесполезен
 }
@@ -39,52 +45,19 @@ type DefMap = HashMap<String, Program>;
 
 type DefTypes = HashMap<String, Type>;
 
+impl Constraint {
+    fn tail_extension(lhs: impl Into<StackCfg>, rhs: impl Into<StackCfg>) -> Constraint {
+        Constraint::TailExtension(lhs.into(), rhs.into())
+    }
+}
+
 impl Replacement {
     fn stack(from: StackCfg, to: StackCfg) -> Replacement {
         Replacement::Stack(from, to)
     }
 
     fn term(from: Term, to: Term) -> Replacement {
-        Replacement::Stack(vec![from], vec![to])
-    }
-}
-
-impl Type {
-    fn apply_replacement(self, replacement: &Replacement) -> Type {
-        Type::new(
-            self.seq
-                .into_iter()
-                .map(|stack_cfg| Type::stack_cfg_apply_replacement(stack_cfg, replacement))
-                .collect::<Vec<_>>(),
-        )
-    }
-
-    fn stack_cfg_apply_replacement(old: StackCfg, replacement: &Replacement) -> StackCfg {
-        match replacement {
-            Replacement::Stack(from, to) => {
-                let mut new: StackCfg = vec![];
-                let mut i = 0;
-
-                while i < old.len() {
-                    if old[i..].starts_with(from) {
-                        let mut to = to.clone();
-                        new.append(&mut to);
-                        i += from.len();
-                    } else {
-                        let old = old[i].clone();
-                        if let Term::Quote { inner } = old {
-                            new.push(Term::quote(inner.apply_replacement(replacement)));
-                        } else {
-                            new.push(old);
-                        }
-                        i += 1;
-                    }
-                }
-
-                new
-            }
-            Replacement::Identity => old,
-        }
+        Replacement::Stack(vec![from].into(), vec![to].into())
     }
 }
 
@@ -101,7 +74,7 @@ fn init_definitions(ast: &Ast, ctx: &mut Context) -> DefMap {
 
     for node in &ast.program {
         if let AstNode::Define { id, value } = node {
-            ctx.emit_debug(format!("infer definition {}", id));
+            ctx.emit_debug(format!("infer definition {}\n", id));
             defs.insert(id.clone(), value.clone());
         }
     }
@@ -126,6 +99,7 @@ fn infer<'d>(
         let node_type = get_node_type(node, def_map, def_tps, &mut ctx.step())?;
         ctx.emit_debug(format!("chain node type: {}", node_type));
         prog_type = chain(&prog_type, &node_type, &mut ctx.step())?;
+        ctx.emit_debug("===");
     }
 
     ctx.emit_debug(format!("resulted type {}", prog_type));
@@ -163,9 +137,9 @@ fn get_node_type<'d>(
                 let tail = Term::tail();
                 let bool = Term::bool();
                 let new_tail = Term::tail();
-                let var = Term::var();
+                let quote = Term::quote(Type::from_inp_out([tail.clone()], [new_tail.clone()]));
                 Ok(Type::from_inp_out(
-                    [tail, bool, var.clone(), var.clone()],
+                    [tail, bool, quote.clone(), quote.clone()],
                     [new_tail],
                 ))
             }
@@ -251,21 +225,43 @@ fn get_node_type<'d>(
 /// В процессе сопоставления генерируются ограничения, для которых затем ищется наиболее общее решение -- унификация. Если решение не существует, то имеет место ошибка типизации.
 fn chain(lhs: &Type, rhs: &Type, ctx: &mut Context) -> Result<Type, TypingError> {
     let (mut lhs, mut rhs) = (lhs.clone(), rhs.clone());
+    ctx.emit_debug(format!("types lhs {} rhs {}", lhs, rhs));
 
-    let mut restrictions = constrain_chain(&lhs, &rhs, &mut ctx.step());
+    let mut constraints: Vec<Constraint> = constrain_chain(&lhs, &rhs, &mut ctx.step());
+    let mut replacements: Vec<Replacement> = vec![];
+    ctx.emit_debug(format!("constraints {}", fmt_vec(&constraints)));
 
-    while !restrictions.is_empty() {
-        ctx.emit_debug(format!("types lhs {} rhs {}", lhs, rhs));
-        ctx.emit_debug(format!("restrictions {:?}", restrictions));
-        for restriction in restrictions {
-            let replacement = chain_solve(restriction, &mut ctx.step())?;
-            ctx.emit_debug(format!("replacement {:?}", replacement));
-            lhs = lhs.apply_replacement(&replacement);
-            rhs = rhs.apply_replacement(&replacement);
+    {
+        let ctx = &mut ctx.step();
+        while !constraints.is_empty() {
+            let constraint = constraints.pop().unwrap();
+            ctx.emit_debug(format!("solve constraint {}", constraint));
+            let replacement = chain_solve(constraint)?;
+            ctx.emit_debug(format!("by replacement {}", replacement));
+            let mut new_constraints: Vec<Constraint> = vec![];
+            for constraint in &constraints {
+                let mut constraints = constraint
+                    .clone()
+                    .apply_replacement(&replacement, &mut ctx.step());
+                // ctx.emit_debug(format!(
+                //     "replace constraint from {} to {}",
+                //     constraint, fmt_vec(&constraints)
+                // ));
+                new_constraints.append(&mut constraints);
+            }
+            replacements.push(replacement);
+            constraints = new_constraints;
         }
-        ctx.emit_debug(format!("applied types lhs {} rhs {}", lhs, rhs));
-        restrictions = constrain_chain(&lhs, &rhs, &mut ctx.step());
     }
+
+    ctx.emit_debug(format!("replacements {}", fmt_vec(&replacements)));
+
+    for replacement in replacements {
+        lhs = lhs.apply_replacement(&replacement);
+        rhs = rhs.apply_replacement(&replacement);
+    }
+
+    ctx.emit_debug(format!("chained types lhs {} rhs {}", lhs, rhs));
 
     Ok(lhs.append(rhs.seq.into_iter().skip(1)))
 }
@@ -281,7 +277,7 @@ fn constrain_chain(lhs: &Type, rhs: &Type, ctx: &mut Context) -> Vec<Constraint>
 
 /// Поиск ограничений эквивалентности
 ///
-/// Эквивалетность типов -- вход и выход первого типа совпадают с входом и выходом второго типа.
+/// Эквивалентность типов -- вход и выход первого типа совпадают с входом и выходом второго типа.
 fn constrain_equivalence(lhs: &Type, rhs: &Type, ctx: &mut Context) -> Vec<Constraint> {
     let (lhs_inp, lhs_out) = lhs.inp_out();
     let (rhs_inp, rhs_out) = rhs.inp_out();
@@ -322,7 +318,7 @@ fn constrain(lhs: &StackCfg, rhs: &StackCfg, ctx: &mut Context) -> Vec<Constrain
                 .rev()
                 .collect();
             let rhs: Vec<Term> = vec![rhs.clone()];
-            constraints.push(Constraint::TailExtension(lhs, rhs));
+            constraints.push(Constraint::tail_extension(lhs, rhs));
             break;
         } else if !lhs_has_next {
             let lhs: Vec<Term> = vec![lhs.clone()];
@@ -331,7 +327,7 @@ fn constrain(lhs: &StackCfg, rhs: &StackCfg, ctx: &mut Context) -> Vec<Constrain
                 .chain(rhs_iter.cloned())
                 .rev()
                 .collect();
-            constraints.push(Constraint::TailExtension(lhs, rhs));
+            constraints.push(Constraint::tail_extension(lhs, rhs));
             break;
         }
     }
@@ -343,14 +339,13 @@ fn constrain(lhs: &StackCfg, rhs: &StackCfg, ctx: &mut Context) -> Vec<Constrain
 ///
 /// 1. Если два типа, то выбирается наиболее конкретный (пример, Int и Var -> Int)
 /// 2. Если конфигурации разного размера, то выбирается наиболее длинная. По сути -- сводится к п.1, если считать, что наиболее общий == наиболее длинный.
-fn chain_solve(restriction: Constraint, ctx: &mut Context) -> Result<Replacement, TypingError> {
-    ctx.emit_debug(format!("unification for {:?}", restriction));
+fn chain_solve(restriction: Constraint) -> Result<Replacement, TypingError> {
     match restriction {
         Constraint::Unification(lhs, rhs) => {
             // Пока правила достаточно простые, reduce всегда возвращает `Ok(to)`, если сведение возможно
             let r_lhs = chain_reduce(&lhs, &rhs).is_some();
             let r_rhs = chain_reduce(&rhs, &lhs).is_some();
-            ctx.emit_debug(format!("reduce_lhs {} reduce_rhs {}", r_lhs, r_rhs));
+            // ctx.emit_debug(format!("reduce_lhs {} reduce_rhs {}", r_lhs, r_rhs));
             // Приоритетно менять правую часть, чтобы не возникло циклов
             // Но вообще надо бы подумать, действительно ли никак не решить цикл без этого странного необходимого порядка
             if r_rhs {
@@ -362,6 +357,10 @@ fn chain_solve(restriction: Constraint, ctx: &mut Context) -> Result<Replacement
             }
         }
         Constraint::TailExtension(lhs, rhs) => {
+            if lhs.first() == rhs.first() {
+                return Err(TypingError::IncompatibleStacks(lhs, rhs));
+            }
+
             if lhs.len() < rhs.len() {
                 Ok(Replacement::stack(lhs, rhs))
             } else if lhs.len() > rhs.len() {
@@ -399,5 +398,66 @@ fn chain_reduce<'t>(from: &'t Term, to: &'t Term) -> Option<&'t Term> {
 
         // В остальных случаях свести нельзя
         _ => Option::None,
+    }
+}
+
+impl Constraint {
+    fn apply_replacement(self, replacement: &Replacement, ctx: &mut Context) -> Vec<Constraint> {
+        match replacement {
+            Replacement::Stack(_, _) => {
+                let (lhs, rhs) = match self {
+                    Constraint::Unification(lhs, rhs) => {
+                        (StackCfg::new([lhs]), StackCfg::new([rhs]))
+                    }
+                    Constraint::TailExtension(lhs, rhs) => (lhs, rhs),
+                };
+
+                constrain(
+                    &stack_cfg_apply_replacement(lhs, replacement),
+                    &stack_cfg_apply_replacement(rhs, replacement),
+                    ctx,
+                )
+            }
+            Replacement::Identity => vec![self],
+        }
+    }
+}
+
+impl Type {
+    fn apply_replacement(self, replacement: &Replacement) -> Type {
+        Type::new(
+            self.seq
+                .into_iter()
+                .map(|stack_cfg| stack_cfg_apply_replacement(stack_cfg, replacement))
+                .collect::<Vec<_>>(),
+        )
+    }
+}
+
+fn stack_cfg_apply_replacement(old: StackCfg, replacement: &Replacement) -> StackCfg {
+    match replacement {
+        Replacement::Stack(from, to) => {
+            let mut new: StackCfg = StackCfg::empty();
+            let mut i = 0;
+
+            while i < old.len() {
+                if old[i..].starts_with(&from) {
+                    let mut to = to.clone();
+                    new.append(&mut to);
+                    i += from.len();
+                } else {
+                    let old = old[i].clone();
+                    if let Term::Quote { inner } = old {
+                        new.push(Term::quote(inner.apply_replacement(replacement)));
+                    } else {
+                        new.push(old);
+                    }
+                    i += 1;
+                }
+            }
+
+            new
+        }
+        Replacement::Identity => old,
     }
 }
