@@ -7,16 +7,19 @@
 use std::collections::HashMap;
 
 use crate::{
-    Ast, CompilerError, Context, MAIN_FN_NAME, Type,
+    Ast, CompilerError, Context, MAIN_FN_NAME,
     hir::{
+        controlflow::build_hir,
         dataflow::analyze_dataflow,
-        structs::{Hir, HirBaseBlock, HirFunction},
+        structs::Hir,
     },
-    parser::{AstNode, Program},
-    typing::{TypesMap, infer_definitions},
+    parser::AstNode,
+    typing::infer_definitions,
 };
 
+mod controlflow;
 mod dataflow;
+mod fmt;
 mod structs;
 
 pub(crate) use structs::{DeclMap, DefMap};
@@ -65,32 +68,32 @@ j3:
 
 pub fn generate_hir(
     ast: &Ast,
-    typing_ctx: &mut Context,
+    typ_ctx: &mut Context,
     hir_ctx: &mut Context,
 ) -> Result<Hir, CompilerError> {
-    let (mut defs, decls) = init_definitions(ast, typing_ctx);
-    hir_ctx.emit_debug(format!("declarations {:?}", decls));
-    hir_ctx.emit_debug(format!("preliminary definitions {:?}", defs));
+    hir_ctx.emit_debug("generate hir".to_string());
+    let (mut defs, decls) = init_definitions(ast, hir_ctx);
+    hir_ctx.emit_debug(format!("init definitions {}", defs));
+    hir_ctx.emit_debug("===".to_string());
     let types =
-        infer_definitions(&decls, &mut defs, typing_ctx).map_err(CompilerError::TypingError)?;
-    assert!(
-        defs.len() == types.len(),
-        "definitions and types should be same size"
-    );
-    hir_ctx.emit_debug(format!("definitions {:?}", defs));
-    hir_ctx.emit_debug(format!("types {:?}", types));
-    let _dataflow = analyze_dataflow(&defs, &types);
-
-    let hir = build_hir(defs, types, hir_ctx);
+        infer_definitions(&decls, &mut defs, typ_ctx).map_err(CompilerError::TypingError)?;
+    hir_ctx.emit_debug(format!("declarations {}", decls));
+    hir_ctx.emit_debug(format!("definitions {}", defs));
+    hir_ctx.emit_debug(format!("types {}", types));
+    hir_ctx.emit_debug("===".to_string());
+    let dataflow = analyze_dataflow(&decls, &defs, &types, hir_ctx);
+    hir_ctx.emit_debug("===".to_string());
+    let hir = build_hir(&decls, &defs, &dataflow, hir_ctx);
 
     Ok(hir)
 }
 
 fn init_definitions<'p>(ast: &'p Ast, ctx: &mut Context) -> (DefMap<'p>, DeclMap) {
     let mut defs = DefMap(HashMap::new());
-    let mut decl = DeclMap(HashMap::new());
+    let mut decl = DeclMap(HashMap::new(), HashMap::new());
 
-    decl.insert(MAIN_FN_NAME.to_string(), ast.program.id);
+    decl.0.insert(MAIN_FN_NAME.to_string(), ast.program.id);
+    decl.1.insert(ast.program.id, MAIN_FN_NAME.to_string());
     defs.insert(ast.program.id, &ast.program);
 
     for node in &*ast.program {
@@ -101,31 +104,12 @@ fn init_definitions<'p>(ast: &'p Ast, ctx: &mut Context) -> (DefMap<'p>, DeclMap
             value: program,
         } = node
         {
-            ctx.emit_debug(format!("define {}\n", name));
-            decl.insert(name.clone(), program.id);
+            ctx.emit_debug(format!("define {}", name));
+            decl.0.insert(name.clone(), program.id);
+            decl.1.insert(program.id, name.clone());
             defs.insert(program.id, program);
         }
     }
 
     (defs, decl)
-}
-
-fn build_hir<'p>(_defs: DefMap<'p>, _types: TypesMap, _ctx: &mut Context) -> Hir {
-    let functions: HashMap<String, HirFunction> = HashMap::new();
-
-    // for (name, t) in types.clone() {
-    //     let program = *defs.get(&name).unwrap();
-    //     let function = build_function(program, &t, &types);
-
-    //     functions.insert(name.clone(), function);
-    // }
-
-    Hir::new(functions)
-}
-
-fn build_function(_program: &Program, _t: &Type, _types: &TypesMap) -> HirFunction {
-    let bbs: Vec<HirBaseBlock> = Vec::new();
-    let _bb_cur = HirBaseBlock::empty();
-
-    HirFunction(bbs)
 }

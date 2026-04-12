@@ -1,0 +1,195 @@
+use itertools::Itertools;
+
+use crate::hir::{
+    DeclMap, DefMap,
+    dataflow::{DataFlowNode, Signature},
+    structs::{Expr, Hir, HirFunction, Instr, InstrKind, Var, VarKind},
+};
+
+impl std::fmt::Display for DeclMap {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{{{}}}",
+            self.0
+                .iter()
+                .map(|(k, v)| format!("{}: {}", k, v))
+                .join(", ")
+        )
+    }
+}
+
+impl<'a> std::fmt::Display for DefMap<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{{{}}}",
+            self.0
+                .iter()
+                .map(|(k, v)| format!("{}: {}", k, v))
+                .join(", ")
+        )
+    }
+}
+
+impl std::fmt::Display for Hir {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        for (_, function) in self.iter() {
+            write!(f, "{}", function)?;
+        }
+
+        Ok(())
+    }
+}
+
+impl std::fmt::Display for HirFunction {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let args = self
+            .signature
+            .args
+            .iter()
+            .map(|var| format!("{}", var))
+            .join(", ");
+        let returns = self
+            .signature
+            .rets
+            .iter()
+            .map(|var| format!("{}", var))
+            .join(", ");
+        let name = if let Some(name) = &self.name {
+            name
+        } else {
+            &"anon".to_string()
+        };
+        writeln!(f, "fn {}({})({}):", *self.id, name, args)?;
+
+        for block in self.iter() {
+            write!(f, "{}:", block.id)?;
+            for expr in block.iter() {
+                write!(f, "\t")?;
+                match expr {
+                    Expr::Goto(block_id) => {
+                        write!(f, "goto {};", block_id)
+                    }
+                    Expr::GotoIf(var, then_block, else_block) => {
+                        write!(
+                            f,
+                            "if {} then goto {}; else goto {};",
+                            var, then_block, *else_block
+                        )
+                    }
+                    Expr::Instr(instr) => {
+                        write!(f, "{};", instr)
+                    }
+                    Expr::Call(program_id, consumes, produces) => {
+                        let args = consumes.iter().map(|var| format!("{}", var)).join(", ");
+                        let rets = produces.iter().map(|var| format!("{}", var)).join(", ");
+                        if rets.is_empty() {
+                            write!(f, "call {}({});", program_id, args)
+                        } else {
+                            write!(f, "{} = call {}({});", rets, program_id, args)
+                        }
+                    }
+                    Expr::Return => {
+                        if !returns.is_empty() {
+                            write!(f, "return {};", returns)
+                        } else {
+                            write!(f, "return;")
+                        }
+                    }
+                }?;
+                writeln!(f)?;
+            }
+        }
+
+        Ok(())
+    }
+}
+
+impl std::fmt::Display for Instr {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let ret = self.produces;
+        let (lhs, rhs) = self.consumes;
+        match self.kind {
+            InstrKind::ConstInt(i) => {
+                write!(f, "{} = {}", ret, i)
+            }
+            InstrKind::ConstBool(b) => {
+                write!(f, "{} = {}", ret, b)
+            }
+            InstrKind::Add => {
+                write!(f, "{} = {} + {}", ret, lhs, rhs)
+            }
+            InstrKind::Sub => {
+                write!(f, "{} = {} - {}", ret, lhs, rhs)
+            }
+            InstrKind::Mul => {
+                write!(f, "{} = {} * {}", ret, lhs, rhs)
+            }
+            InstrKind::Div => {
+                write!(f, "{} = {} / {}", ret, lhs, rhs)
+            }
+            InstrKind::Less => {
+                write!(f, "{} = {} < {}", ret, lhs, rhs)
+            }
+            InstrKind::LessOrEq => {
+                write!(f, "{} = {} <= {}", ret, lhs, rhs)
+            }
+            InstrKind::Great => {
+                write!(f, "{} = {} > {}", ret, lhs, rhs)
+            }
+            InstrKind::GreatOrEq => {
+                write!(f, "{} = {} >= {}", ret, lhs, rhs)
+            }
+        }
+    }
+}
+
+impl std::fmt::Display for Var {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.kind {
+            VarKind::Int => {
+                write!(f, "i{}", *self.id)
+            }
+            VarKind::Bool => {
+                write!(f, "b{}", *self.id)
+            }
+            VarKind::Any => {
+                write!(f, "a{}", *self.id)
+            }
+            VarKind::AnonFn(program_id) => {
+                write!(f, "fn{}({})", *self.id, *program_id)
+            }
+            VarKind::Nothing => {
+                write!(f, "NOTHING{}", *self.id)
+            }
+        }
+    }
+}
+
+impl std::fmt::Display for Signature {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let args = self.args.iter().map(|var| format!("{}", var)).join(", ");
+        let rets = self.rets.iter().map(|var| format!("{}", var)).join(", ");
+
+        write!(f, "fn({})->({})", args, rets)
+    }
+}
+
+impl std::fmt::Display for DataFlowNode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            DataFlowNode::Producer(var) => write!(f, "{{ producer {} }}", var),
+            DataFlowNode::Triple(var_triple) => write!(
+                f,
+                "{{ triple {} {} -> {} }}",
+                var_triple.args.0, var_triple.args.1, var_triple.ret
+            ),
+            DataFlowNode::Call(signature) => write!(f, "{{ signature {} }}", signature),
+            DataFlowNode::CallVar(var, signature) => write!(f, "{{ call {} {} }}", var, signature),
+            DataFlowNode::If(if_) => {
+                write!(f, "{{ if {} {} {} }}", if_.condition, if_.th.0, if_.el.0)
+            }
+        }
+    }
+}

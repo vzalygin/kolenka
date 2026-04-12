@@ -4,7 +4,7 @@ use std::collections::HashMap;
 
 use derived_deref::{Deref, DerefMut};
 
-use crate::id::VarId;
+use crate::{ProgramId, id::VarId};
 
 #[derive(PartialEq, Eq, Hash, Clone, Debug)]
 pub struct Type {
@@ -76,9 +76,10 @@ impl Type {
                                 let replacement = match term {
                                     StackVar::Tail(_) => StackVar::tail(),
                                     StackVar::Var(_) => StackVar::var(),
-                                    StackVar::Quote { inner } => {
-                                        StackVar::quote(inner.clone_id_internal(replacements))
-                                    }
+                                    StackVar::Quote { program_id, inner } => StackVar::quote(
+                                        *program_id,
+                                        inner.clone_id_internal(replacements),
+                                    ),
                                     StackVar::Int(_) => StackVar::int(),
                                     StackVar::Bool(_) => StackVar::bool(),
                                 };
@@ -124,7 +125,7 @@ pub enum StackVar {
     Tail(VarId),
     Var(VarId),
 
-    Quote { inner: Type },
+    Quote { program_id: ProgramId, inner: Type },
 
     Int(VarId),
     Bool(VarId),
@@ -139,8 +140,8 @@ impl StackVar {
         StackVar::Var(VarId::new())
     }
 
-    pub(crate) fn quote(inner: Type) -> StackVar {
-        StackVar::Quote { inner }
+    pub(crate) fn quote(program_id: ProgramId, inner: Type) -> StackVar {
+        StackVar::Quote { program_id, inner }
     }
 
     pub(crate) fn int() -> StackVar {
