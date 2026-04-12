@@ -56,14 +56,33 @@ pub(crate) struct Program {
 #[derive(Debug, Clone)]
 pub(crate) enum AstNode {
     // types
-    Int { id: OpId, value: i32 },
-    Bool { id: OpId, value: bool },
+    Int {
+        id: OpId,
+        value: i32,
+    },
+    Bool {
+        id: OpId,
+        value: bool,
+    },
 
     // prog
-    BuiltinIdentifier { id: OpId, value: Builtin },
-    Identifier { id: OpId, value: String },
-    Quote { id: OpId, value: Program },
-    Define { id: OpId, name: String, value: Program },
+    BuiltinIdentifier {
+        id: OpId,
+        value: Builtin,
+    },
+    Identifier {
+        id: OpId,
+        value: String,
+    },
+    Quote {
+        id: OpId,
+        value: Program,
+    },
+    Define {
+        id: OpId,
+        name: String,
+        value: Program,
+    },
     // types ?
 }
 
@@ -111,7 +130,12 @@ pub fn parse_source(input: &str, ctx: &mut Context) -> Result<Ast, CompilerError
 fn program<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, Ast, E> {
     map(
         all_consuming(delimited(multispace0, terms, multispace0)),
-        |terms| Ast { program: Program { id: ProgramId::new(), terms } },
+        |terms| Ast {
+            program: Program {
+                id: ProgramId::new(),
+                terms,
+            },
+        },
     )(input)
 }
 
@@ -126,7 +150,13 @@ fn term<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, AstNode,
 fn quotation<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, AstNode, E> {
     map(
         delimited(tag("[").and(multispace0), terms, multispace0.and(tag("]"))),
-        |inner| AstNode::Quote { id: OpId::new(), value: Program { id: ProgramId::new(), terms: inner } },
+        |inner| AstNode::Quote {
+            id: OpId::new(),
+            value: Program {
+                id: ProgramId::new(),
+                terms: inner,
+            },
+        },
     )(input)
 }
 
@@ -142,13 +172,19 @@ fn define<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, AstNod
         |(name, definition)| AstNode::Define {
             id: OpId::new(),
             name,
-            value: Program { id: ProgramId::new(), terms: definition },
+            value: Program {
+                id: ProgramId::new(),
+                terms: definition,
+            },
         },
     )(input)
 }
 
 fn identifier<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, AstNode, E> {
-    map(string, |id: String| AstNode::Identifier { id: OpId::new(), value: id })(input)
+    map(string, |id: String| AstNode::Identifier {
+        id: OpId::new(),
+        value: id,
+    })(input)
 }
 
 fn string<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, String, E> {
@@ -161,14 +197,23 @@ fn string<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, String
 fn num<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, AstNode, E> {
     map(take_while1(|c: char| is_digit(c as u8)), |number: &str| {
         let number = number.parse::<i32>().unwrap();
-        AstNode::Int { id: OpId::new(), value: number }
+        AstNode::Int {
+            id: OpId::new(),
+            value: number,
+        }
     })(input)
 }
 
 fn bool<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, AstNode, E> {
     alt((
-        map(tag("true"), |_| AstNode::Bool { id: OpId::new(), value: true }),
-        map(tag("false"), |_| AstNode::Bool { id: OpId::new(), value: false }),
+        map(tag("true"), |_| AstNode::Bool {
+            id: OpId::new(),
+            value: true,
+        }),
+        map(tag("false"), |_| AstNode::Bool {
+            id: OpId::new(),
+            value: false,
+        }),
     ))(input)
 }
 
@@ -192,7 +237,10 @@ fn builtin<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, AstNo
             map(tag("dup"), |_| Builtin::Dup),
             map(tag("swap"), |_| Builtin::Swap),
         )),
-        |builtin| AstNode::BuiltinIdentifier { id: OpId::new(), value: builtin },
+        |builtin| AstNode::BuiltinIdentifier {
+            id: OpId::new(),
+            value: builtin,
+        },
     )(input)
 }
 

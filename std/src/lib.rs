@@ -8,7 +8,7 @@ pub extern "C" fn read_i32() -> i32 {
     loop {
         let nread = std::io::stdin().read(&mut input).unwrap();
         let input = std::str::from_utf8(&input[..nread]).unwrap();
-        let mut iter = input.split_whitespace();
+        let iter = input.split_whitespace();
         for num in iter {
             if let Ok(num) = num.parse::<i32>() {
                 return num;

@@ -4,16 +4,22 @@
 //!
 //! При преобразовании [`crate::parser::Ast`] в [`Hir`] для каждой команды вычисляется ее трехадресный код. Вывод типов определяет, какая команда принимает какие данные на вход за счет выведенных формы и размера стека. Преобразование в [`Hir`] также накладывает ограничения на тип главной программы -- она не должна принимать на вход дополнительных аргументов (или может принимать, но тогда это аргументы вызова?; подумать над этим).
 
-use std::{collections::HashMap, fmt::format};
+use std::collections::HashMap;
 
 use crate::{
-    Ast, CompilerError, Context, MAIN_FN_NAME, ProgramId, Type, hir::{dataflow::analyze_dataflow, structs::{Expr, Hir, HirBaseBlock, HirFunction, Operation, Var, VarType}}, parser::{AstNode, Builtin, Program}, typing::{StackVar, TypesMap, infer_definitions}
+    Ast, CompilerError, Context, MAIN_FN_NAME, Type,
+    hir::{
+        dataflow::analyze_dataflow,
+        structs::{Hir, HirBaseBlock, HirFunction},
+    },
+    parser::{AstNode, Program},
+    typing::{TypesMap, infer_definitions},
 };
 
-mod structs;
 mod dataflow;
+mod structs;
 
-pub(crate) use structs::{DefMap, DeclMap};
+pub(crate) use structs::{DeclMap, DefMap};
 
 /*
 Пусть у нас программа
@@ -57,19 +63,23 @@ j3:
     print(i18)
 */
 
-pub fn generate_hir<'p>(
-    ast: &'p Ast,
+pub fn generate_hir(
+    ast: &Ast,
     typing_ctx: &mut Context,
     hir_ctx: &mut Context,
 ) -> Result<Hir, CompilerError> {
     let (mut defs, decls) = init_definitions(ast, typing_ctx);
     hir_ctx.emit_debug(format!("declarations {:?}", decls));
     hir_ctx.emit_debug(format!("preliminary definitions {:?}", defs));
-    let types = infer_definitions(&decls, &mut defs, typing_ctx).map_err(CompilerError::TypingError)?;
-    assert!(defs.len() == types.len(), "definitions and types should be same size");
+    let types =
+        infer_definitions(&decls, &mut defs, typing_ctx).map_err(CompilerError::TypingError)?;
+    assert!(
+        defs.len() == types.len(),
+        "definitions and types should be same size"
+    );
     hir_ctx.emit_debug(format!("definitions {:?}", defs));
     hir_ctx.emit_debug(format!("types {:?}", types));
-    let dataflow = analyze_dataflow(&defs, &types);
+    let _dataflow = analyze_dataflow(&defs, &types);
 
     let hir = build_hir(defs, types, hir_ctx);
 
@@ -85,7 +95,12 @@ fn init_definitions<'p>(ast: &'p Ast, ctx: &mut Context) -> (DefMap<'p>, DeclMap
 
     for node in &*ast.program {
         // TODO удалить id здесь?
-        if let AstNode::Define { id: _, name, value: program } = node {
+        if let AstNode::Define {
+            id: _,
+            name,
+            value: program,
+        } = node
+        {
             ctx.emit_debug(format!("define {}\n", name));
             decl.insert(name.clone(), program.id);
             defs.insert(program.id, program);
@@ -95,8 +110,8 @@ fn init_definitions<'p>(ast: &'p Ast, ctx: &mut Context) -> (DefMap<'p>, DeclMap
     (defs, decl)
 }
 
-fn build_hir<'p>(defs: DefMap<'p>, types: TypesMap, ctx: &mut Context) -> Hir {
-    let mut functions: HashMap<String, HirFunction> = HashMap::new();
+fn build_hir<'p>(_defs: DefMap<'p>, _types: TypesMap, _ctx: &mut Context) -> Hir {
+    let functions: HashMap<String, HirFunction> = HashMap::new();
 
     // for (name, t) in types.clone() {
     //     let program = *defs.get(&name).unwrap();
@@ -108,10 +123,9 @@ fn build_hir<'p>(defs: DefMap<'p>, types: TypesMap, ctx: &mut Context) -> Hir {
     Hir::new(functions)
 }
 
-fn build_function<'p>(program: &'p Program, t: &Type, types: &TypesMap) -> HirFunction {
-    let mut bbs: Vec<HirBaseBlock> = Vec::new();
-    let mut bb_cur = HirBaseBlock::empty();
-
+fn build_function(_program: &Program, _t: &Type, _types: &TypesMap) -> HirFunction {
+    let bbs: Vec<HirBaseBlock> = Vec::new();
+    let _bb_cur = HirBaseBlock::empty();
 
     HirFunction(bbs)
 }

@@ -6,10 +6,13 @@ use derived_deref::{Deref, DerefMut};
 use thiserror::Error;
 
 use crate::{
-    Context, ProgramId, hir::{DeclMap, DefMap}, parser::{AstNode, Builtin}, typing::{
+    Context, ProgramId,
+    hir::{DeclMap, DefMap},
+    parser::{AstNode, Builtin},
+    typing::{
         fmt::fmt_vec,
         structs::{StackCfg, StackVar, Type},
-    }
+    },
 };
 
 #[derive(Error, Debug)]
@@ -60,7 +63,11 @@ impl Replacement {
 pub(crate) struct TypesMap(pub(crate) HashMap<ProgramId, Type>);
 
 /// Вывод типа для всей программы
-pub(crate) fn infer_definitions(decls: &DeclMap, defs: &mut DefMap, ctx: &mut Context) -> Result<TypesMap, TypingError> {
+pub(crate) fn infer_definitions(
+    decls: &DeclMap,
+    defs: &mut DefMap,
+    ctx: &mut Context,
+) -> Result<TypesMap, TypingError> {
     let mut def_types: TypesMap = TypesMap(HashMap::new());
 
     for (id, program) in defs.iter() {
@@ -140,11 +147,12 @@ fn get_node_type<'d>(
                 let tail = StackVar::tail();
                 let in_tail = StackVar::tail();
                 let bool = StackVar::bool();
-                let cond_quote = StackVar::quote(Type::from_inp_out([tail.clone()], [in_tail.clone(), bool]));
+                let cond_quote =
+                    StackVar::quote(Type::from_inp_out([tail.clone()], [in_tail.clone(), bool]));
                 let body_quote = StackVar::quote(Type::from_inp_out([in_tail], [tail.clone()]));
                 Ok(Type::from_inp_out(
                     [tail.clone(), cond_quote, body_quote],
-                    [tail]
+                    [tail],
                 ))
             }
             Builtin::Add | Builtin::Sub | Builtin::Mul | Builtin::Div => {
@@ -187,12 +195,12 @@ fn get_node_type<'d>(
                 let tail = StackVar::tail();
                 let tail_in = StackVar::tail();
                 let var = StackVar::var();
-                let var_quoted = StackVar::quote(Type::from_inp_out([tail_in.clone()], [tail_in.clone(), var.clone()]));
-                Ok(Type::from_inp_out(
-                    [tail.clone(), var],
-                    [tail, var_quoted]
-                ))
-            },
+                let var_quoted = StackVar::quote(Type::from_inp_out(
+                    [tail_in.clone()],
+                    [tail_in.clone(), var.clone()],
+                ));
+                Ok(Type::from_inp_out([tail.clone(), var], [tail, var_quoted]))
+            }
             Builtin::Compose => {
                 let tail = StackVar::tail();
                 let from = StackVar::tail();
@@ -203,11 +211,15 @@ fn get_node_type<'d>(
                 let quote_res = StackVar::quote(Type::from_inp_out([from], [to]));
                 Ok(Type::from_inp_out(
                     [tail.clone(), quote1, quote2],
-                    [tail, quote_res]
+                    [tail, quote_res],
                 ))
-            },
+            }
         },
-        AstNode::Define { id: _, name: _, value: _ } => Ok(Type::trivial()),
+        AstNode::Define {
+            id: _,
+            name: _,
+            value: _,
+        } => Ok(Type::trivial()),
         AstNode::Int { id: _, value: _ } => {
             let tail = StackVar::tail();
             let int = StackVar::int();
@@ -220,7 +232,6 @@ fn get_node_type<'d>(
             Ok(Type::from_inp_out([tail.clone()], [tail, bool]))
         }
         AstNode::Identifier { id: _, value } => {
-
             let prog_id = decl_map
                 .get(value)
                 .ok_or(TypingError::UnknownIdentifier(value.clone()))?;
@@ -251,7 +262,11 @@ fn get_node_type<'d>(
             let quote_inner_id = quote_type.id;
             let quote = StackVar::quote(quote_type);
 
-            Ok(Type::from_id_inp_out(quote_inner_id, [tail.clone()], [tail, quote])) // T-QUOTE rule
+            Ok(Type::from_id_inp_out(
+                quote_inner_id,
+                [tail.clone()],
+                [tail, quote],
+            )) // T-QUOTE rule
         }
     }
 }
@@ -271,8 +286,8 @@ fn chain(lhs: &Type, rhs: &Type, ctx: &mut Context) -> Result<Type, TypingError>
 
     {
         let ctx = &mut ctx.step();
-        while !constraints.is_empty() {
-            let constraint = constraints.pop().unwrap();
+        while let Some(constraint) = constraints.pop() {
+            
             ctx.emit_debug(format!("solve constraint {}", constraint));
             let replacement = chain_solve(constraint)?;
             ctx.emit_debug(format!("by replacement {}", replacement));
@@ -479,13 +494,13 @@ fn stack_cfg_apply_replacement(old: StackCfg, replacement: &Replacement) -> Stac
             let mut i = 0;
 
             while i < old.len() {
-                if old[i..].starts_with(&from) {
+                if old[i..].starts_with(from) {
                     let mut to = to.clone();
                     new.append(&mut to);
                     i += from.len();
                 } else {
                     let old = old[i].clone();
-                    if let StackVar::Quote { inner } = &old {
+                    if let StackVar::Quote { inner: _ } = &old {
                         // FIXME надо делать замены внутри цитат?
                         // Кажется, что нет
                         // new.push(Term::quote(inner.apply_replacement(replacement)));

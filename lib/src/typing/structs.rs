@@ -6,7 +6,6 @@ use derived_deref::{Deref, DerefMut};
 
 use crate::id::VarId;
 
-
 #[derive(PartialEq, Eq, Hash, Clone, Debug)]
 pub struct Type {
     pub(crate) id: VarId,
@@ -31,7 +30,11 @@ impl Type {
         Type::new(VarId::new(), vec![inp.into(), out.into()])
     }
 
-    pub(crate) fn from_id_inp_out(id: VarId, inp: impl Into<StackCfg>, out: impl Into<StackCfg>) -> Type {
+    pub(crate) fn from_id_inp_out(
+        id: VarId,
+        inp: impl Into<StackCfg>,
+        out: impl Into<StackCfg>,
+    ) -> Type {
         Type::new(id, vec![inp.into(), out.into()])
     }
 
@@ -73,11 +76,16 @@ impl Type {
                                 let replacement = match term {
                                     StackVar::Tail(_) => StackVar::tail(),
                                     StackVar::Var(_) => StackVar::var(),
-                                    StackVar::Quote { inner } => StackVar::quote(inner.clone_id_internal(replacements)),
+                                    StackVar::Quote { inner } => {
+                                        StackVar::quote(inner.clone_id_internal(replacements))
+                                    }
                                     StackVar::Int(_) => StackVar::int(),
                                     StackVar::Bool(_) => StackVar::bool(),
                                 };
-                                replacements.entry(term.clone()).or_insert(replacement).clone()
+                                replacements
+                                    .entry(term.clone())
+                                    .or_insert(replacement)
+                                    .clone()
                             }
                         })
                         .collect::<Vec<StackVar>>(),
@@ -142,5 +150,4 @@ impl StackVar {
     pub(crate) fn bool() -> StackVar {
         StackVar::Bool(VarId::new())
     }
-
 }
