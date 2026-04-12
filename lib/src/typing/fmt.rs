@@ -102,24 +102,16 @@ impl StackVar {
                     .term_names
                     .entry(self)
                     .or_insert_with(|| naming.var_names_it.next().unwrap().to_string());
-                write!(
-                    f,
-                    "{}{}",
-                    name.bright_cyan(),
-                    id.to_string().bright_cyan()
-                )?;
+                write!(f, "{}{}", name.bright_cyan(), id.to_string().bright_cyan())?;
             }
             StackVar::Quote { inner } => {
                 write!(f, "{}", "(".bright_white())?;
                 inner.fmt_inner(f, naming)?;
                 write!(f, "{}", ")".bright_white())?;
             }
-            StackVar::Int(id) => write!(
-                f,
-                "{}{}",
-                "int".bright_cyan(),
-                id.to_string().bright_cyan()
-            )?,
+            StackVar::Int(id) => {
+                write!(f, "{}{}", "int".bright_cyan(), id.to_string().bright_cyan())?
+            }
             StackVar::Bool(id) => write!(
                 f,
                 "{}{}",
@@ -169,7 +161,7 @@ impl std::fmt::Display for Replacement {
 
 impl std::fmt::Display for StackCfg {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", fmt_vec(&self))
+        write!(f, "{}", fmt_vec(self))
     }
 }
 

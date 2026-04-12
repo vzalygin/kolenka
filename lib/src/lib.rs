@@ -2,20 +2,20 @@ mod codegen;
 mod context;
 mod error;
 mod hir;
+mod id;
 mod parser;
 mod typing;
-mod id;
 
 pub use crate::{
     context::{Context, LogLevel},
     error::CompilerError,
     hir::generate_hir,
+    id::ProgramId,
     parser::{Ast, parse_source},
     typing::Type,
-    id::ProgramId
 };
 
-static MAIN_FN_NAME: &'static str = "$main";
+static MAIN_FN_NAME: &str = "$main";
 
 #[cfg(test)]
 mod tests {

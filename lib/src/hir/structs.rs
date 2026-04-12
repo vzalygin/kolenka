@@ -2,7 +2,10 @@ use std::collections::HashMap;
 
 use derived_deref::{Deref, DerefMut};
 
-use crate::{Type, id::{BlockId, ProgramId, VarId}, parser::Program};
+use crate::{
+    id::{BlockId, ProgramId, VarId},
+    parser::Program,
+};
 
 /// Мапа для сопоставления пользовательских имен и идентификаторов
 #[derive(Debug, Clone, Deref, DerefMut)]
@@ -42,7 +45,7 @@ impl HirBaseBlock {
 
 #[derive(Debug, Clone)]
 pub enum Expr {
-    Goto(BlockId), // Безусловно перейти в блок
+    Goto(BlockId),                 // Безусловно перейти в блок
     GotoIf(Var, BlockId, BlockId), // По условию 0 перейти в 1 или 2
     Instr(Var, Operation),
     Call(ProgramId, Vec<Var>, Vec<Var>),
@@ -51,7 +54,7 @@ pub enum Expr {
 #[derive(Debug, Clone)]
 pub struct Var {
     pub(crate) id: VarId,
-    pub(crate) t: VarType
+    pub(crate) t: VarType,
 }
 
 impl Var {
@@ -80,5 +83,5 @@ pub enum VarType {
     Int,
     Bool,
     Any,
-    AnonFn
+    AnonFn,
 }

@@ -4,7 +4,16 @@ use std::collections::HashMap;
 
 use derived_deref::{Deref, DerefMut};
 
-use crate::{ProgramId, Type, hir::{DefMap, structs::{Var, VarType}}, id::{OpId, VarId}, parser::{AstNode, Builtin, Program}, typing::{StackVar, TypesMap}};
+use crate::{
+    ProgramId, Type,
+    hir::{
+        DefMap,
+        structs::{Var, VarType},
+    },
+    id::{OpId, VarId},
+    parser::{AstNode, Builtin, Program},
+    typing::{StackVar, TypesMap},
+};
 
 #[derive(Debug, Clone, Deref, DerefMut)]
 pub(crate) struct DataFlowMap(HashMap<ProgramId, DataFlow>);
@@ -28,8 +37,16 @@ pub(crate) struct DataFlowNode {
 }
 
 impl DataFlowNode {
-    fn new(id: OpId, depends: impl Into<Vec<VarId>>, produces: impl Into<Vec<VarId>>) -> DataFlowNode {
-        DataFlowNode { id, depends: depends.into(), produces: produces.into() }
+    fn new(
+        id: OpId,
+        depends: impl Into<Vec<VarId>>,
+        produces: impl Into<Vec<VarId>>,
+    ) -> DataFlowNode {
+        DataFlowNode {
+            id,
+            depends: depends.into(),
+            produces: produces.into(),
+        }
     }
 }
 
@@ -37,13 +54,17 @@ impl DataFlowNode {
 #[derive(Debug, Clone)]
 pub(crate) struct DataFlowVar {
     id: VarId,
-    produced: Vec<OpId>, 
+    produced: Vec<OpId>,
     depends: Vec<OpId>,
 }
 
 impl DataFlowVar {
     fn new(id: VarId) -> DataFlowVar {
-        DataFlowVar { id, depends: [].into(), produced: [].into() }
+        DataFlowVar {
+            id,
+            depends: [].into(),
+            produced: [].into(),
+        }
     }
 
     /// Команды, которые зависят от переменной
@@ -60,20 +81,18 @@ impl DataFlowVar {
 }
 
 pub(crate) fn analyze_dataflow<'n>(defs: &'n DefMap, types: &'n TypesMap) -> DataFlowMap {
-    DataFlowMap(defs.iter()
-        .map(|(program_id, program)| {
-            let t = types.get(program_id).unwrap();
-            (*program_id, analyze_program_dataflow(program, t))
-        })
-        .collect())
+    DataFlowMap(
+        defs.iter()
+            .map(|(program_id, program)| {
+                let t = types.get(program_id).unwrap();
+                (*program_id, analyze_program_dataflow(program, t))
+            })
+            .collect(),
+    )
 }
 
 fn analyze_program_dataflow<'n>(program: &'n Program, t: &'n Type) -> DataFlow {
-    let prog_type_merged = 
-        program.iter().zip(
-            t.seq.iter().zip(
-                t.seq.iter().skip(1)
-        ));
+    let prog_type_merged = program.iter().zip(t.seq.iter().zip(t.seq.iter().skip(1)));
 
     let mut nodes: HashMap<OpId, DataFlowNode> = HashMap::new();
     let mut vars: HashMap<VarId, DataFlowVar> = HashMap::new();
@@ -89,16 +108,16 @@ fn analyze_program_dataflow<'n>(program: &'n Program, t: &'n Type) -> DataFlow {
                     .or_insert(DataFlowVar::new(var.id))
                     .push_produced(*id);
                 nodes.insert(*id, node);
-            },
+            }
             AstNode::BuiltinIdentifier { id, value } => match value {
-                Builtin::Add |
-                Builtin::Sub |
-                Builtin::Mul |
-                Builtin::Div |
-                Builtin::Less |
-                Builtin::LessOrEq |
-                Builtin::Great |
-                Builtin::GreatOrEq => {
+                Builtin::Add
+                | Builtin::Sub
+                | Builtin::Mul
+                | Builtin::Div
+                | Builtin::Less
+                | Builtin::LessOrEq
+                | Builtin::Great
+                | Builtin::GreatOrEq => {
                     let inp1 = get_var(&mut stack_inp);
                     let inp2 = get_var(&mut stack_inp);
                     let out = get_var(&mut stack_out);
@@ -113,7 +132,7 @@ fn analyze_program_dataflow<'n>(program: &'n Program, t: &'n Type) -> DataFlow {
                         .or_insert(DataFlowVar::new(out.id))
                         .push_produced(*id);
                     nodes.insert(*id, dataflow);
-                },
+                }
                 Builtin::Eval => todo!(),
                 Builtin::If => todo!(),
                 Builtin::While => todo!(),
@@ -123,9 +142,13 @@ fn analyze_program_dataflow<'n>(program: &'n Program, t: &'n Type) -> DataFlow {
                 Builtin::Quote => todo!(),
                 Builtin::Compose => todo!(),
             },
-            AstNode::Identifier { id, value: _ } => todo!(),
-            AstNode::Quote { id, value: _ } => todo!(),
-            AstNode::Define { id: _, name: _, value: _ } => unreachable!("inner defines are not allowed"),
+            AstNode::Identifier { id: _, value: _ } => todo!(),
+            AstNode::Quote { id: _, value: _ } => todo!(),
+            AstNode::Define {
+                id: _,
+                name: _,
+                value: _,
+            } => unreachable!("inner defines are not allowed"),
         }
     }
 
