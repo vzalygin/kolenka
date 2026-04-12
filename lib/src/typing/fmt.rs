@@ -1,11 +1,13 @@
 //! Модуль с имплами [`std::fmt::Display`] для структур вывод типов.
 
 use colored::Colorize;
+use itertools::Itertools;
 use std::collections::HashMap;
 
 use crate::{
     Type,
     typing::{
+        TypesMap,
         inference::{Constraint, Replacement},
         structs::{StackCfg, StackVar},
     },
@@ -104,7 +106,10 @@ impl StackVar {
                     .or_insert_with(|| naming.var_names_it.next().unwrap().to_string());
                 write!(f, "{}{}", name.bright_cyan(), id.to_string().bright_cyan())?;
             }
-            StackVar::Quote { inner } => {
+            StackVar::Quote {
+                program_id: _,
+                inner,
+            } => {
                 write!(f, "{}", "(".bright_white())?;
                 inner.fmt_inner(f, naming)?;
                 write!(f, "{}", ")".bright_white())?;
@@ -192,4 +197,17 @@ where
     T: std::fmt::Display,
 {
     FmtVec(vec)
+}
+
+impl std::fmt::Display for TypesMap {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{{{}}}",
+            self.0
+                .iter()
+                .map(|(k, v)| format!("{}: {}", k, v))
+                .join(", ")
+        )
+    }
 }

@@ -63,17 +63,18 @@ impl Replacement {
 pub(crate) struct TypesMap(pub(crate) HashMap<ProgramId, Type>);
 
 /// Вывод типа для всей программы
-pub(crate) fn infer_definitions(
+pub(crate) fn infer_definitions<'n>(
     decls: &DeclMap,
-    defs: &mut DefMap,
+    defs: &mut DefMap<'n>,
     ctx: &mut Context,
 ) -> Result<TypesMap, TypingError> {
     let mut def_types: TypesMap = TypesMap(HashMap::new());
 
-    for (id, program) in defs.iter() {
-        if !def_types.contains_key(id) {
-            let t = infer(program, decls, defs, &mut def_types, ctx)?;
-            def_types.insert(*id, t);
+    for (_, program_id) in decls.iter() {
+        let program = *defs.get(program_id).unwrap();
+        if !def_types.contains_key(program_id) {
+            let t = infer(*program_id, program, decls, defs, &mut def_types, ctx)?;
+            def_types.insert(*program_id, t);
         }
     }
 
@@ -81,24 +82,30 @@ pub(crate) fn infer_definitions(
 }
 
 /// Вывод типа для последовательности команд
-fn infer<'d>(
-    nodes: &'d Vec<AstNode>,
-    decl_map: &'d DeclMap,
-    def_map: &'d DefMap,
-    def_tps: &'d mut TypesMap,
+fn infer<'n>(
+    program_id: ProgramId,
+    nodes: &'n Vec<AstNode>,
+    decls: &DeclMap,
+    defs: &mut DefMap<'n>,
+    types: &mut TypesMap,
     ctx: &mut Context,
 ) -> Result<Type, TypingError> {
+    ctx.emit_debug(format!("infer program {}", program_id));
+
     let mut prog_type = match nodes.first() {
-        Some(first) => get_node_type(first, decl_map, def_map, def_tps, &mut ctx.step()),
+        Some(first) => {
+            ctx.emit_debug(format!("chaining {}", first));
+            get_node_type(first, decls, defs, types, &mut ctx.step())
+        }
         None => Ok(Type::trivial()),
     }?;
 
     for node in nodes.iter().skip(1) {
-        ctx.emit_debug(format!("chaining {:?}", node));
-        let node_type = get_node_type(node, decl_map, def_map, def_tps, &mut ctx.step())?;
+        ctx.emit_debug(format!("chaining {}", node));
+        let node_type = get_node_type(node, decls, defs, types, &mut ctx.step())?;
         ctx.emit_debug(format!("chain node type: {}", node_type));
         prog_type = chain(&prog_type, &node_type, &mut ctx.step())?;
-        ctx.emit_debug("===");
+        ctx.emit_debug("---");
     }
 
     ctx.emit_debug(format!("resulted type {}", prog_type));
@@ -118,11 +125,11 @@ fn infer<'d>(
 /// cond    : ('a 'a Bool 'S -> 'a 'S)
 /// while   : (('S -> Bool 'R) ('R -> 'S) 'S -> 'S)
 /// ```
-fn get_node_type<'d>(
-    node: &'d AstNode,
-    decl_map: &'d DeclMap,
-    def_map: &'d DefMap,
-    def_types: &'d mut TypesMap,
+fn get_node_type<'n>(
+    node: &'n AstNode,
+    decls: &DeclMap,
+    defs: &mut DefMap<'n>,
+    types: &mut TypesMap,
     ctx: &mut Context,
 ) -> Result<Type, TypingError> {
     match node {
@@ -130,14 +137,21 @@ fn get_node_type<'d>(
             Builtin::Eval => {
                 let tail = StackVar::tail();
                 let new_tail = StackVar::tail();
-                let quote = StackVar::quote(Type::from_inp_out([tail.clone()], [new_tail.clone()]));
+                // TODO тут точно надо ProgramId::new() ?
+                let quote = StackVar::quote(
+                    ProgramId::new(),
+                    Type::from_inp_out([tail.clone()], [new_tail.clone()]),
+                );
                 Ok(Type::from_inp_out([tail, quote], [new_tail]))
             }
             Builtin::If => {
                 let tail = StackVar::tail();
                 let bool = StackVar::bool();
                 let new_tail = StackVar::tail();
-                let quote = StackVar::quote(Type::from_inp_out([tail.clone()], [new_tail.clone()]));
+                let quote = StackVar::quote(
+                    ProgramId::new(),
+                    Type::from_inp_out([tail.clone()], [new_tail.clone()]),
+                );
                 Ok(Type::from_inp_out(
                     [tail, bool, quote.clone(), quote.clone()],
                     [new_tail],
@@ -147,9 +161,14 @@ fn get_node_type<'d>(
                 let tail = StackVar::tail();
                 let in_tail = StackVar::tail();
                 let bool = StackVar::bool();
-                let cond_quote =
-                    StackVar::quote(Type::from_inp_out([tail.clone()], [in_tail.clone(), bool]));
-                let body_quote = StackVar::quote(Type::from_inp_out([in_tail], [tail.clone()]));
+                let cond_quote = StackVar::quote(
+                    ProgramId::new(),
+                    Type::from_inp_out([tail.clone()], [in_tail.clone(), bool]),
+                );
+                let body_quote = StackVar::quote(
+                    ProgramId::new(),
+                    Type::from_inp_out([in_tail], [tail.clone()]),
+                );
                 Ok(Type::from_inp_out(
                     [tail.clone(), cond_quote, body_quote],
                     [tail],
@@ -195,10 +214,10 @@ fn get_node_type<'d>(
                 let tail = StackVar::tail();
                 let tail_in = StackVar::tail();
                 let var = StackVar::var();
-                let var_quoted = StackVar::quote(Type::from_inp_out(
-                    [tail_in.clone()],
-                    [tail_in.clone(), var.clone()],
-                ));
+                let var_quoted = StackVar::quote(
+                    ProgramId::new(),
+                    Type::from_inp_out([tail_in.clone()], [tail_in.clone(), var.clone()]),
+                );
                 Ok(Type::from_inp_out([tail.clone(), var], [tail, var_quoted]))
             }
             Builtin::Compose => {
@@ -206,9 +225,13 @@ fn get_node_type<'d>(
                 let from = StackVar::tail();
                 let mid = StackVar::tail();
                 let to = StackVar::tail();
-                let quote1 = StackVar::quote(Type::from_inp_out([from.clone()], [mid.clone()]));
-                let quote2 = StackVar::quote(Type::from_inp_out([mid], [to.clone()]));
-                let quote_res = StackVar::quote(Type::from_inp_out([from], [to]));
+                let quote1 = StackVar::quote(
+                    ProgramId::new(),
+                    Type::from_inp_out([from.clone()], [mid.clone()]),
+                );
+                let quote2 =
+                    StackVar::quote(ProgramId::new(), Type::from_inp_out([mid], [to.clone()]));
+                let quote_res = StackVar::quote(ProgramId::new(), Type::from_inp_out([from], [to]));
                 Ok(Type::from_inp_out(
                     [tail.clone(), quote1, quote2],
                     [tail, quote_res],
@@ -232,11 +255,11 @@ fn get_node_type<'d>(
             Ok(Type::from_inp_out([tail.clone()], [tail, bool]))
         }
         AstNode::Identifier { id: _, value } => {
-            let prog_id = decl_map
+            let prog_id = decls
                 .get(value)
                 .ok_or(TypingError::UnknownIdentifier(value.clone()))?;
 
-            let t = def_types.get(prog_id);
+            let t = types.get(prog_id);
 
             if let Some(t) = t {
                 Ok(t.clone_id())
@@ -245,25 +268,40 @@ fn get_node_type<'d>(
                 // Можно множить на каждый вызов новое "определение", а потом схлопывать одинаковые определения.
                 // Можно ли отложить на более поздние этапы? Вопрос в том, до какого момента код еще может быть полиморфным.
                 // Пока думаю, что лучше попозже заиметь мапу k: (ProgramId, Vec<VarType>, Vec<VarType>), v: ... с неполиморфными определениями.
-                let prog = def_map
+                let prog = defs
                     .get(prog_id)
                     .ok_or(TypingError::UnknownIdentifier(value.clone()))?;
-
-                let t = infer(prog, decl_map, def_map, def_types, &mut ctx.step())?.clone_inp_out();
-                let t_return = t.clone_id();
-                def_types.insert(*prog_id, t);
+                let t = infer(*prog_id, prog, decls, defs, types, &mut ctx.step())?;
+                // FIXME зачем тут clone_inp_out, а затем clone_id?
+                let t_return = t.clone_inp_out().clone_id();
+                types.insert(*prog_id, t);
                 Ok(t_return)
             }
         }
-        AstNode::Quote { id: _, value } => {
+        AstNode::Quote {
+            id: _,
+            value: quote_program,
+        } => {
+            ctx.emit_debug(format!("infer quote {:?}", quote_program));
+
             let tail = StackVar::tail();
-            ctx.emit_debug(format!("infer quote {:?}", value));
-            let quote_type = infer(value, decl_map, def_map, def_types, &mut ctx.step())?;
-            let quote_inner_id = quote_type.id;
-            let quote = StackVar::quote(quote_type);
+            let quote_type = infer(
+                quote_program.id,
+                quote_program,
+                decls,
+                defs,
+                types,
+                &mut ctx.step(),
+            )?;
+            let quote_var_id = quote_type.id;
+            let quote = StackVar::quote(quote_program.id, quote_type.clone());
+
+            // Цитату необходимо добавить как отдельную программу
+            defs.insert(quote_program.id, quote_program);
+            types.insert(quote_program.id, quote_type);
 
             Ok(Type::from_id_inp_out(
-                quote_inner_id,
+                quote_var_id,
                 [tail.clone()],
                 [tail, quote],
             )) // T-QUOTE rule
@@ -287,7 +325,6 @@ fn chain(lhs: &Type, rhs: &Type, ctx: &mut Context) -> Result<Type, TypingError>
     {
         let ctx = &mut ctx.step();
         while let Some(constraint) = constraints.pop() {
-            
             ctx.emit_debug(format!("solve constraint {}", constraint));
             let replacement = chain_solve(constraint)?;
             ctx.emit_debug(format!("by replacement {}", replacement));
@@ -356,8 +393,14 @@ fn constrain(lhs: &StackCfg, rhs: &StackCfg, ctx: &mut Context) -> Vec<Constrain
 
         if lhs_has_next == rhs_has_next {
             if lhs != rhs {
-                if let StackVar::Quote { inner: lhs } = lhs
-                    && let StackVar::Quote { inner: rhs } = rhs
+                if let StackVar::Quote {
+                    program_id: _,
+                    inner: lhs,
+                } = lhs
+                    && let StackVar::Quote {
+                        program_id: _,
+                        inner: rhs,
+                    } = rhs
                 {
                     constraints.append(&mut constrain_equivalence(lhs, rhs, &mut ctx.step()));
                 } else {
@@ -425,7 +468,7 @@ fn chain_solve(restriction: Constraint) -> Result<Replacement, TypingError> {
     }
 }
 
-/// Если переменную `from` можно свести к `to` в контексте сцепки типов, то функция возвращает рельтат сведения
+/// Если переменную `from` можно свести к `to` в контексте сцепки типов, то функция возвращает результат сведения
 fn chain_reduce<'t>(from: &'t StackVar, to: &'t StackVar) -> Option<&'t StackVar> {
     match (from, to) {
         // Стек можно свести только к другому стеку
@@ -434,12 +477,27 @@ fn chain_reduce<'t>(from: &'t StackVar, to: &'t StackVar) -> Option<&'t StackVar
         // Переменную можно свести к любому более конкретному типу
         (StackVar::Var(_), StackVar::Tail(_)) => Option::Some(to),
         (StackVar::Var(_), StackVar::Var(_)) => Option::Some(to),
-        (StackVar::Var(_), StackVar::Quote { inner: _ }) => Option::Some(to),
+        (
+            StackVar::Var(_),
+            StackVar::Quote {
+                program_id: _,
+                inner: _,
+            },
+        ) => Option::Some(to),
         (StackVar::Var(_), StackVar::Int(_)) => Option::Some(to),
         (StackVar::Var(_), StackVar::Bool(_)) => Option::Some(to),
 
         // Цитату можно свести только к другой цитате
-        (StackVar::Quote { inner: _ }, StackVar::Quote { inner: _ }) => Option::Some(to),
+        (
+            StackVar::Quote {
+                program_id: _,
+                inner: _,
+            },
+            StackVar::Quote {
+                program_id: _,
+                inner: _,
+            },
+        ) => Option::Some(to),
 
         // Число можно свести к числу и булю
         (StackVar::Int(_), StackVar::Int(_)) => Option::Some(to),
@@ -500,7 +558,11 @@ fn stack_cfg_apply_replacement(old: StackCfg, replacement: &Replacement) -> Stac
                     i += from.len();
                 } else {
                     let old = old[i].clone();
-                    if let StackVar::Quote { inner: _ } = &old {
+                    if let StackVar::Quote {
+                        program_id: _,
+                        inner: _,
+                    } = &old
+                    {
                         // FIXME надо делать замены внутри цитат?
                         // Кажется, что нет
                         // new.push(Term::quote(inner.apply_replacement(replacement)));

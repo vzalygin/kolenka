@@ -1,4 +1,5 @@
 use derived_deref::{Deref, DerefMut};
+use itertools::Itertools;
 use nom::{
     Finish, IResult, Parser,
     branch::alt,
@@ -10,7 +11,7 @@ use nom::{
     sequence::{delimited, pair, preceded, terminated},
 };
 
-use crate::{ProgramId, context::Context, error::CompilerError, id::OpId};
+use crate::{ProgramId, context::Context, error::CompilerError, id::NodeId};
 
 /// EBNF
 ///
@@ -53,37 +54,73 @@ pub(crate) struct Program {
     pub(crate) terms: Vec<AstNode>,
 }
 
+impl std::fmt::Display for Program {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "(id{} {})", self.id, self.terms.iter().join(" "))
+    }
+}
+
 #[derive(Debug, Clone)]
 pub(crate) enum AstNode {
     // types
     Int {
-        id: OpId,
+        id: NodeId,
         value: i32,
     },
     Bool {
-        id: OpId,
+        id: NodeId,
         value: bool,
     },
 
     // prog
     BuiltinIdentifier {
-        id: OpId,
+        id: NodeId,
         value: Builtin,
     },
     Identifier {
-        id: OpId,
+        id: NodeId,
         value: String,
     },
     Quote {
-        id: OpId,
+        id: NodeId,
         value: Program,
     },
     Define {
-        id: OpId,
+        id: NodeId,
         name: String,
         value: Program,
     },
     // types ?
+}
+
+impl AstNode {
+    pub(crate) fn get_id(&self) -> &NodeId {
+        match self {
+            AstNode::Int { id, value: _ } => id,
+            AstNode::Bool { id, value: _ } => id,
+            AstNode::BuiltinIdentifier { id, value: _ } => id,
+            AstNode::Identifier { id, value: _ } => id,
+            AstNode::Quote { id, value: _ } => id,
+            AstNode::Define {
+                id,
+                name: _,
+                value: _,
+            } => id,
+        }
+    }
+}
+
+impl std::fmt::Display for AstNode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            AstNode::Int { id, value } => write!(f, "(id{} {})", id, value),
+            AstNode::Bool { id, value } => write!(f, "(id{} {})", id, value),
+            AstNode::BuiltinIdentifier { id, value } => write!(f, "(id{} {})", id, value),
+            AstNode::Identifier { id, value } => write!(f, "(id{} {})", id, value),
+            AstNode::Quote { id, value } => write!(f, "[id{} {}]", id, value),
+            AstNode::Define { id, name: _, value } => write!(f, "(id{} define {})", id, value),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -111,10 +148,33 @@ pub(crate) enum Builtin {
     Compose,
 }
 
+impl std::fmt::Display for Builtin {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Builtin::Eval => write!(f, "eval"),
+            Builtin::If => write!(f, "if"),
+            Builtin::While => write!(f, "while"),
+            Builtin::Add => write!(f, "add"),
+            Builtin::Sub => write!(f, "sub"),
+            Builtin::Mul => write!(f, "mul"),
+            Builtin::Div => write!(f, "div"),
+            Builtin::Less => write!(f, "<"),
+            Builtin::LessOrEq => write!(f, "<="),
+            Builtin::Great => write!(f, ">"),
+            Builtin::GreatOrEq => write!(f, ">="),
+            Builtin::Pop => write!(f, "pop"),
+            Builtin::Dup => write!(f, "dup"),
+            Builtin::Swap => write!(f, "swap"),
+            Builtin::Quote => write!(f, "quote"),
+            Builtin::Compose => write!(f, "compose"),
+        }
+    }
+}
+
 pub fn parse_source(input: &str, ctx: &mut Context) -> Result<Ast, CompilerError> {
     match program::<VerboseError<&str>>(input).finish() {
         Ok((_, ast)) => {
-            ctx.emit_debug(format!("parsed {:?}", ast));
+            ctx.emit_debug(format!("parsed {}", ast.program));
             Ok(ast)
         }
         Err(e) => {
@@ -151,7 +211,7 @@ fn quotation<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, Ast
     map(
         delimited(tag("[").and(multispace0), terms, multispace0.and(tag("]"))),
         |inner| AstNode::Quote {
-            id: OpId::new(),
+            id: NodeId::new(),
             value: Program {
                 id: ProgramId::new(),
                 terms: inner,
@@ -170,7 +230,7 @@ fn define<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, AstNod
             ),
         ),
         |(name, definition)| AstNode::Define {
-            id: OpId::new(),
+            id: NodeId::new(),
             name,
             value: Program {
                 id: ProgramId::new(),
@@ -182,7 +242,7 @@ fn define<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, AstNod
 
 fn identifier<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, AstNode, E> {
     map(string, |id: String| AstNode::Identifier {
-        id: OpId::new(),
+        id: NodeId::new(),
         value: id,
     })(input)
 }
@@ -198,7 +258,7 @@ fn num<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, AstNode, 
     map(take_while1(|c: char| is_digit(c as u8)), |number: &str| {
         let number = number.parse::<i32>().unwrap();
         AstNode::Int {
-            id: OpId::new(),
+            id: NodeId::new(),
             value: number,
         }
     })(input)
@@ -207,11 +267,11 @@ fn num<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, AstNode, 
 fn bool<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, AstNode, E> {
     alt((
         map(tag("true"), |_| AstNode::Bool {
-            id: OpId::new(),
+            id: NodeId::new(),
             value: true,
         }),
         map(tag("false"), |_| AstNode::Bool {
-            id: OpId::new(),
+            id: NodeId::new(),
             value: false,
         }),
     ))(input)
@@ -238,7 +298,7 @@ fn builtin<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, AstNo
             map(tag("swap"), |_| Builtin::Swap),
         )),
         |builtin| AstNode::BuiltinIdentifier {
-            id: OpId::new(),
+            id: NodeId::new(),
             value: builtin,
         },
     )(input)

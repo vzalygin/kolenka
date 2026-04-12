@@ -44,7 +44,7 @@ fn compile(source: String) -> Result<(), CompilerError> {
     let ast = parse_source(&source, &mut parser_context)?;
 
     let hir = generate_hir(&ast, &mut typing_context, &mut hir_context)?;
-    println!("hir {:?}", hir);
+    println!("{}", hir);
 
     Ok(())
 }
