@@ -45,12 +45,14 @@ impl std::fmt::Display for Hir {
 impl std::fmt::Display for HirFunction {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let args = self
+            .dataflow
             .signature
             .args
             .iter()
             .map(|var| format!("{}", var))
             .join(", ");
         let returns = self
+            .dataflow
             .signature
             .rets
             .iter()
@@ -67,38 +69,8 @@ impl std::fmt::Display for HirFunction {
             write!(f, "{}:", block.id)?;
             for expr in block.iter() {
                 write!(f, "\t")?;
-                match expr {
-                    Expr::Goto(block_id) => {
-                        write!(f, "goto {};", block_id)
-                    }
-                    Expr::GotoIf(var, then_block, else_block) => {
-                        write!(
-                            f,
-                            "if {} then goto {}; else goto {};",
-                            var, then_block, *else_block
-                        )
-                    }
-                    Expr::Instr(instr) => {
-                        write!(f, "{};", instr)
-                    }
-                    Expr::Call(program_id, consumes, produces) => {
-                        let args = consumes.iter().map(|var| format!("{}", var)).join(", ");
-                        let rets = produces.iter().map(|var| format!("{}", var)).join(", ");
-                        if rets.is_empty() {
-                            write!(f, "call {}({});", program_id, args)
-                        } else {
-                            write!(f, "{} = call {}({});", rets, program_id, args)
-                        }
-                    }
-                    Expr::Return => {
-                        if !returns.is_empty() {
-                            write!(f, "return {};", returns)
-                        } else {
-                            write!(f, "return;")
-                        }
-                    }
-                }?;
-                writeln!(f)?;
+                expr.fmt_inner(f, &returns)?;
+                write!(f, "\n")?;
             }
         }
 
@@ -191,5 +163,51 @@ impl std::fmt::Display for DataFlowNode {
                 write!(f, "{{ if {} {} {} }}", if_.condition, if_.th.0, if_.el.0)
             }
         }
+    }
+}
+
+impl Expr {
+    fn fmt_inner(
+        &self,
+        f: &mut std::fmt::Formatter,
+        returns: &String,
+    ) -> std::fmt::Result {
+        match self {
+            Expr::Goto(block_id) => {
+                write!(f, "goto {};", block_id)
+            }
+            Expr::GotoIf(var, then_block, else_block) => {
+                write!(
+                    f,
+                    "if {} then goto {}; else goto {};",
+                    var, then_block, *else_block
+                )
+            }
+            Expr::Instr(instr) => {
+                write!(f, "{};", instr)
+            }
+            Expr::Call(program_id, consumes, produces) => {
+                let args = consumes.iter().map(|var| format!("{}", var)).join(", ");
+                let rets = produces.iter().map(|var| format!("{}", var)).join(", ");
+                if rets.is_empty() {
+                    write!(f, "call {}({});", program_id, args)
+                } else {
+                    write!(f, "{} = call {}({});", rets, program_id, args)
+                }
+            }
+            Expr::Return => {
+                if !returns.is_empty() {
+                    write!(f, "return {};", returns)
+                } else {
+                    write!(f, "return;")
+                }
+            }
+        }
+    }
+}
+
+impl std::fmt::Display for Expr {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.fmt_inner(f, &String::new())
     }
 }

@@ -9,13 +9,14 @@ mod typing;
 pub use crate::{
     context::{Context, LogLevel},
     error::CompilerError,
-    hir::generate_hir,
+    hir::build_hir,
     id::ProgramId,
     parser::{Ast, parse_source},
     typing::Type,
+    codegen::{generate_bytecode, WasmModule}
 };
 
-static MAIN_FN_NAME: &str = "$main";
+static MAIN_FN_NAME: &str = "_start";
 
 #[cfg(test)]
 mod tests {
