@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use derived_deref::{Deref, DerefMut};
 
 use crate::{
-    hir::dataflow::Signature,
+    hir::dataflow::{DataFlow},
     id::{BlockId, InstrId, ProgramId, VarId},
     parser::Program,
 };
@@ -31,17 +31,17 @@ pub struct Hir(pub(crate) HashMap<ProgramId, HirFunction>);
 pub struct HirFunction {
     pub(crate) id: ProgramId,
     pub(crate) name: Option<String>,
-    pub(crate) signature: Signature,
+    pub(crate) dataflow: DataFlow,
     #[target]
     pub(crate) blocks: Vec<HirBaseBlock>,
 }
 
 impl HirFunction {
-    pub(crate) fn empty(id: ProgramId, name: Option<&String>, signature: Signature) -> HirFunction {
+    pub(crate) fn empty(id: ProgramId, name: Option<&String>, dataflow: DataFlow) -> HirFunction {
         HirFunction {
             id,
             name: name.cloned(),
-            signature,
+            dataflow,
             blocks: vec![],
         }
     }

@@ -13,7 +13,7 @@ use crate::{
     parser::{AstNode, Builtin, Program},
 };
 
-pub(crate) fn build_hir<'n>(
+pub(crate) fn construct_hir<'n>(
     decls: &'n DeclMap,
     defs: &'n DefMap,
     dataflow: &'n DataFlowMap,
@@ -45,7 +45,7 @@ pub(crate) fn build_hir_function<'p>(
     let mut function = HirFunction::empty(
         program.id,
         decls.revmap().get(&program.id),
-        dataflow.signature.clone(),
+        dataflow.clone(),
     );
     let mut curr_bb = HirBaseBlock::new();
 

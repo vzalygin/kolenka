@@ -9,9 +9,8 @@ use std::collections::HashMap;
 use crate::{
     Ast, CompilerError, Context, MAIN_FN_NAME,
     hir::{
-        controlflow::build_hir,
-        dataflow::analyze_dataflow,
-        structs::Hir,
+        controlflow::construct_hir,
+        dataflow::analyze_dataflow
     },
     parser::AstNode,
     typing::infer_definitions,
@@ -22,7 +21,7 @@ mod dataflow;
 mod fmt;
 mod structs;
 
-pub(crate) use structs::{DeclMap, DefMap};
+pub(crate) use crate::hir::{structs::{DeclMap, DefMap, Hir, Var, VarKind, HirFunction, HirBaseBlock, Expr, Instr, InstrKind}, dataflow::{Signature, DataFlow}};
 
 /*
 Пусть у нас программа
@@ -66,7 +65,7 @@ j3:
     print(i18)
 */
 
-pub fn generate_hir(
+pub fn build_hir(
     ast: &Ast,
     typ_ctx: &mut Context,
     hir_ctx: &mut Context,
@@ -83,8 +82,9 @@ pub fn generate_hir(
     hir_ctx.emit_debug("===".to_string());
     let dataflow = analyze_dataflow(&decls, &defs, &types, hir_ctx);
     hir_ctx.emit_debug("===".to_string());
-    let hir = build_hir(&decls, &defs, &dataflow, hir_ctx);
-
+    let hir = construct_hir(&decls, &defs, &dataflow, hir_ctx);
+    hir_ctx.emit_debug(format!("HIR listing\n{}", hir));
+    validate_main(&hir, &decls)?;
     Ok(hir)
 }
 
@@ -112,4 +112,22 @@ fn init_definitions<'p>(ast: &'p Ast, ctx: &mut Context) -> (DefMap<'p>, DeclMap
     }
 
     (defs, decl)
+}
+
+fn validate_main(hir: &Hir, decls: &DeclMap) -> Result<(), CompilerError> {
+    let main_id = decls.get(&MAIN_FN_NAME.to_string()).unwrap();
+    let main_function = hir.get(main_id).unwrap();
+
+    if main_function.dataflow.signature.args.len() > 0 {
+        return Err(CompilerError::LogicError { description: 
+            format!("main function must has no parameters, but found {}", main_function.dataflow.signature.args.len()) 
+        });
+    }
+    if main_function.dataflow.signature.rets.len() > 1 {
+        return Err(CompilerError::LogicError { description: 
+            format!("main function must return 0 or 1 vars, but found {}", main_function.dataflow.signature.rets.len()) 
+        });
+    }
+
+    Ok(())
 }

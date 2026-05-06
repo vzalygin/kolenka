@@ -8,4 +8,6 @@ pub enum CompilerError {
     ParserError { description: String },
     #[error("typing error: {0}")]
     TypingError(TypingError),
+    #[error("logic error: {description}")]
+    LogicError { description: String },
 }
