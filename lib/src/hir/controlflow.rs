@@ -3,6 +3,8 @@
 //! Генерирует команды трехадресного кода с разбивкой по базовым блокам.
 
 
+use std::collections::HashMap;
+
 use crate::{
     Context,
     hir::{
@@ -10,7 +12,7 @@ use crate::{
         dataflow::{DataFlow, DataFlowMap},
         structs::{Expr, Hir, HirBaseBlock, HirFunction, Instr, InstrKind, VarKind},
     },
-    parser::{AstNode, Builtin, Program},
+    parser::{AstNode, Builtin, Program}, prelude::{STD_PRINT_FN_NAME, STD_READ_FN_NAME},
 };
 
 pub(crate) fn construct_hir<'n>(
@@ -19,7 +21,7 @@ pub(crate) fn construct_hir<'n>(
     dataflow: &'n DataFlowMap,
     ctx: &mut Context,
 ) -> Hir {
-    Hir(defs
+    let mut hir = Hir(defs
         .iter()
         .map(|(program_id, program)| {
             ctx.emit_debug("---");
@@ -31,7 +33,14 @@ pub(crate) fn construct_hir<'n>(
                 build_hir_function(program, dataflow, decls, ctx),
             )
         })
-        .collect())
+        .collect());
+
+    let std_read_id = *decls.get(STD_READ_FN_NAME).unwrap();
+    let std_print_id = *decls.get(STD_PRINT_FN_NAME).unwrap();
+    hir.insert(std_read_id, HirFunction::std(std_print_id, Some(&STD_READ_FN_NAME.to_string())));
+    hir.insert(std_print_id, HirFunction::std(std_print_id, Some(&STD_PRINT_FN_NAME.to_string())));
+
+    hir
 }
 
 pub(crate) fn build_hir_function<'p>(

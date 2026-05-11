@@ -6,22 +6,19 @@ use derived_deref::{Deref, DerefMut};
 use thiserror::Error;
 
 use crate::{
-    Context, ProgramId,
-    hir::{DeclMap, DefMap},
-    parser::{AstNode, Builtin},
-    typing::{
+    Context, ProgramId, hir::{DeclMap, DefMap}, parser::{AstNode, Builtin}, prelude::{STD_PRINT_FN_NAME, STD_READ_FN_NAME}, typing::{
         fmt::fmt_vec,
         structs::{StackCfg, StackVar, Type},
-    },
+    }
 };
 
 #[derive(Error, Debug)]
 pub enum TypingError {
-    #[error("Incompatible types {0} and {1}")]
+    #[error("incompatible types {0} and {1}")]
     IncompatibleTypes(StackVar, StackVar),
-    #[error("Incompatible stacks {0} and {1}")]
+    #[error("incompatible stacks {0} and {1}")]
     IncompatibleStacks(StackCfg, StackCfg),
-    #[error("Unknown id {0}")]
+    #[error("unknown declaration {0}")]
     UnknownIdentifier(String),
 }
 
@@ -70,15 +67,33 @@ pub(crate) fn infer_definitions<'n>(
 ) -> Result<TypesMap, TypingError> {
     let mut def_types: TypesMap = TypesMap(HashMap::new());
 
-    for (_, program_id) in decls.iter() {
-        let program = *defs.get(program_id).unwrap();
-        if !def_types.contains_key(program_id) {
-            let t = infer(*program_id, program, decls, defs, &mut def_types, ctx)?;
+    for (name, program_id) in decls.iter() {
+        if let Some(t) = std_type(name) {
             def_types.insert(*program_id, t);
+        } else {
+            let program = *defs.get(program_id).unwrap();
+            if !def_types.contains_key(program_id) {
+                let t = infer(*program_id, program, decls, defs, &mut def_types, ctx)?;
+                def_types.insert(*program_id, t);
+            }
         }
     }
 
     Ok(def_types)
+}
+
+fn std_type(name: &String) -> Option<Type> {
+    if name == STD_READ_FN_NAME {
+        let tail = StackVar::tail();
+        let int = StackVar::int();
+        Option::Some(Type::from_inp_out([tail.clone()], [tail, int]))
+    } else if name == STD_PRINT_FN_NAME {
+        let tail = StackVar::tail();
+        let int = StackVar::int();
+        Option::Some(Type::from_inp_out([tail.clone(), int], [tail]))
+    } else {
+        Option::None
+    }
 }
 
 /// Вывод типа для последовательности команд
@@ -268,10 +283,18 @@ fn get_node_type<'n>(
                 // Можно множить на каждый вызов новое "определение", а потом схлопывать одинаковые определения.
                 // Можно ли отложить на более поздние этапы? Вопрос в том, до какого момента код еще может быть полиморфным.
                 // Пока думаю, что лучше попозже заиметь мапу k: (ProgramId, Vec<VarType>, Vec<VarType>), v: ... с неполиморфными определениями.
-                let prog = defs
-                    .get(prog_id)
-                    .ok_or(TypingError::UnknownIdentifier(value.clone()))?;
-                let t = infer(*prog_id, prog, decls, defs, types, &mut ctx.step())?;
+
+                let std_t = std_type(value);
+
+                let t = if std_t.is_none() {
+                    let prog = defs
+                        .get(prog_id)
+                        .ok_or(TypingError::UnknownIdentifier(value.clone()))?;
+                    infer(*prog_id, prog, decls, defs, types, &mut ctx.step())?
+                } else {
+                    std_t.unwrap()
+                };
+
                 // FIXME зачем тут clone_inp_out, а затем clone_id?
                 let t_return = t.clone_inp_out().clone_id();
                 types.insert(*prog_id, t);
