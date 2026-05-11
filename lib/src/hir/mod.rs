@@ -7,13 +7,10 @@
 use std::collections::HashMap;
 
 use crate::{
-    Ast, CompilerError, Context, MAIN_FN_NAME,
-    hir::{
+    Ast, CompilerError, Context, ProgramId, hir::{
         controlflow::construct_hir,
         dataflow::analyze_dataflow
-    },
-    parser::AstNode,
-    typing::infer_definitions,
+    }, parser::AstNode, prelude::{MAIN_FN_NAME, STD_PRINT_FN_NAME, STD_READ_FN_NAME}, typing::infer_definitions
 };
 
 mod controlflow;
@@ -92,9 +89,11 @@ fn init_definitions<'p>(ast: &'p Ast, ctx: &mut Context) -> (DefMap<'p>, DeclMap
     let mut defs = DefMap(HashMap::new());
     let mut decl = DeclMap(HashMap::new(), HashMap::new());
 
-    decl.0.insert(MAIN_FN_NAME.to_string(), ast.program.id);
-    decl.1.insert(ast.program.id, MAIN_FN_NAME.to_string());
+    add_decl(&mut decl, MAIN_FN_NAME.to_string(), ast.program.id);
     defs.insert(ast.program.id, &ast.program);
+
+    add_decl(&mut decl, STD_READ_FN_NAME.to_string(), ProgramId::new());
+    add_decl(&mut decl, STD_PRINT_FN_NAME.to_string(), ProgramId::new());
 
     for node in &*ast.program {
         // TODO удалить id здесь?
@@ -105,13 +104,17 @@ fn init_definitions<'p>(ast: &'p Ast, ctx: &mut Context) -> (DefMap<'p>, DeclMap
         } = node
         {
             ctx.emit_debug(format!("define {}", name));
-            decl.0.insert(name.clone(), program.id);
-            decl.1.insert(program.id, name.clone());
+            add_decl(&mut decl, name.clone(), program.id);
             defs.insert(program.id, program);
         }
     }
 
     (defs, decl)
+}
+
+fn add_decl(decl: &mut DeclMap, name: String, id: ProgramId) {
+    decl.0.insert(name.clone(), id);
+    decl.1.insert(id, name);
 }
 
 fn validate_main(hir: &Hir, decls: &DeclMap) -> Result<(), CompilerError> {

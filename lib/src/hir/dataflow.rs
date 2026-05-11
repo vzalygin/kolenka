@@ -5,14 +5,10 @@ use std::collections::HashMap;
 use derived_deref::{Deref, DerefMut};
 
 use crate::{
-    Context, ProgramId, Type,
-    hir::{
+    Context, ProgramId, Type, hir::{
         DeclMap, DefMap,
         structs::{Var, VarKind},
-    },
-    id::{NodeId, VarId},
-    parser::{AstNode, Builtin, Program},
-    typing::{StackVar, TypesMap},
+    }, id::{NodeId, VarId}, parser::{AstNode, Builtin, Program}, prelude::STD_FNS, typing::{StackVar, TypesMap}
 };
 
 #[derive(Debug, Clone, Deref, DerefMut)]
@@ -153,8 +149,8 @@ pub(crate) fn analyze_dataflow<'n>(
 ) -> DataFlowMap {
     ctx.emit_debug("prepare dataflow for program".to_string());
     assert!(
-        defs.len() == types.len(),
-        "definitions and types should be same size"
+        defs.len() + STD_FNS.len() == types.len(),
+        "definitions with std and types should be same size"
     );
 
     let signatures = SignatureMap(

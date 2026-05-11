@@ -5,6 +5,7 @@ mod hir;
 mod id;
 mod parser;
 mod typing;
+mod prelude;
 
 pub use crate::{
     context::{Context, LogLevel},
@@ -15,8 +16,6 @@ pub use crate::{
     typing::Type,
     codegen::{generate_bytecode, WasmModule}
 };
-
-static MAIN_FN_NAME: &str = "_start";
 
 #[cfg(test)]
 mod tests {

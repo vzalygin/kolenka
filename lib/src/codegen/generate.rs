@@ -5,7 +5,7 @@ use std::{collections::{HashMap, HashSet}, fmt::format};
 use wasm_encoder::{Function, InstructionSink, RefType, ValType};
 use wasmprinter::print_bytes;
 
-use crate::{Context, MAIN_FN_NAME, ProgramId, WasmModule, codegen::{WasmLocalId, WasmType, blocks_graph::{self, BlocksGraph, analyze_blocks_graph}, wasm::{WasmFunctionBundle, WasmFunctionId, WasmModuleBundle}}, hir::{Expr, Hir, HirBaseBlock, HirFunction, Instr, InstrKind, Signature, Var, VarKind}, id::{BlockId, VarId}};
+use crate::{Context, ProgramId, WasmModule, codegen::{WasmLocalId, WasmType, blocks_graph::{self, BlocksGraph, analyze_blocks_graph}, wasm::{WasmFunctionBundle, WasmFunctionId, WasmModuleBundle}}, hir::{Expr, Hir, HirBaseBlock, HirFunction, Instr, InstrKind, Signature, Var, VarKind}, id::{BlockId, VarId}, prelude::{MAIN_FN_NAME, STD_PRINT_FN_NAME, STD_READ_FN_NAME, WASM_MAIN_FN_NAME, WASM_STD_MODULE_NAME, WASM_STD_PRINT_FN_NAME, WASM_STD_READ_FN_NAME}};
 
 pub fn generate_bytecode(program: &Hir, ctx: &mut Context) -> Vec<u8> {
     let mut module = WasmModule::new();
@@ -19,7 +19,7 @@ pub fn generate_bytecode(program: &Hir, ctx: &mut Context) -> Vec<u8> {
         module.function_definition(function_id, func);
 
         if let Some(name) = &hir.name && name == MAIN_FN_NAME {
-            module.function_export(function_id, name.as_str());
+            module.function_export(function_id, WASM_MAIN_FN_NAME);
         }
     }
 
@@ -191,13 +191,28 @@ fn generate_blocks(
 }
 
 fn make_module_bundle(module: &mut WasmModule, program: &Hir) -> WasmModuleBundle {
-    WasmModuleBundle { functions: program.iter()
-        .map(|(program_id, hir)| {
+    let mut functions: HashMap<ProgramId, WasmFunctionId> = HashMap::new();
+
+    let std_read_id = module.function_import(WASM_STD_MODULE_NAME, WASM_STD_READ_FN_NAME, WasmType::new([], [ValType::I32]));
+    let std_print_id = module.function_import(WASM_STD_MODULE_NAME, WASM_STD_PRINT_FN_NAME, WasmType::new([ValType::I32], []));
+
+    for (program_id, hir) in program.iter() {
+        if hir.std {
+            let name = &hir.name.clone().unwrap(); 
+            if name == STD_READ_FN_NAME {
+                functions.insert(*program_id, std_read_id);
+            }
+            if name == STD_PRINT_FN_NAME {
+                functions.insert(*program_id, std_print_id);
+            }
+        } else {
             let function_type = make_wasm_type(&hir.dataflow.signature);
             let function_id = module.function_declaration(function_type);
-            (*program_id, function_id)
-        })
-        .collect() }
+            functions.insert(*program_id, function_id);
+        }
+    }
+
+    WasmModuleBundle { functions }
 }
 
 fn make_function_bundle(hir: &HirFunction) -> WasmFunctionBundle {
