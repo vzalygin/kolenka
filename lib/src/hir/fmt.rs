@@ -63,7 +63,7 @@ impl std::fmt::Display for HirFunction {
         } else {
             &"anon".to_string()
         };
-        writeln!(f, "fn {}({})({}):", *self.id, name, args)?;
+        writeln!(f, "fn{}[{}]({}):", *self.id, name, args)?;
 
         for block in self.iter() {
             write!(f, "{}:", block.id)?;
@@ -130,7 +130,7 @@ impl std::fmt::Display for Var {
                 write!(f, "a{}", *self.id)
             }
             VarKind::AnonFn(program_id) => {
-                write!(f, "fn{}({})", *self.id, *program_id)
+                write!(f, "fn{}", *program_id)
             }
             VarKind::Nothing => {
                 write!(f, "NOTHING{}", *self.id)
@@ -190,9 +190,9 @@ impl Expr {
                 let args = consumes.iter().map(|var| format!("{}", var)).join(", ");
                 let rets = produces.iter().map(|var| format!("{}", var)).join(", ");
                 if rets.is_empty() {
-                    write!(f, "call {}({});", program_id, args)
+                    write!(f, "call fn{}({});", program_id, args)
                 } else {
-                    write!(f, "{} = call {}({});", rets, program_id, args)
+                    write!(f, "{} = call fn{}({});", rets, program_id, args)
                 }
             }
             Expr::Return => {

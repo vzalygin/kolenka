@@ -277,7 +277,7 @@ fn get_node_type<'n>(
             let t = types.get(prog_id);
 
             if let Some(t) = t {
-                Ok(t.clone_id())
+                Ok(t.clone_change_id())
             } else {
                 // TODO нужно ли тут клонировать программу с изменением id? Вроде как да, потому что надо гарантировать полиморфизм
                 // Можно множить на каждый вызов новое "определение", а потом схлопывать одинаковые определения.
@@ -296,7 +296,8 @@ fn get_node_type<'n>(
                 };
 
                 // FIXME зачем тут clone_inp_out, а затем clone_id?
-                let t_return = t.clone_inp_out().clone_id();
+                // UPD потому что надо положить только начало и конец `clone_inp_out`, а еще отвязать переменные внутренние переменные от внешних `clone_id` (точно надо?)
+                let t_return = t.clone_only_inp_out().clone_change_id();
                 types.insert(*prog_id, t);
                 Ok(t_return)
             }
@@ -582,14 +583,17 @@ fn stack_cfg_apply_replacement(old: StackCfg, replacement: &Replacement) -> Stac
                 } else {
                     let old = old[i].clone();
                     if let StackVar::Quote {
-                        program_id: _,
-                        inner: _,
+                        program_id,
+                        inner,
                     } = &old
                     {
                         // FIXME надо делать замены внутри цитат?
                         // Кажется, что нет
-                        // new.push(Term::quote(inner.apply_replacement(replacement)));
-                        new.push(old);
+                        // UPD Делать замены надо, но как-то аккуратно... quote swap quote compose eval
+                        // UPD 2 Проблема скорее в самом dup, из-за которого подстановки решили не делать -- в нем нужно полностью копировать цитату
+                        // UPD 3 с учетом чейнинга в таком случае теряется тип копируемой переменной (тк копирование происходит раньше замены). Придумать случай, когда эта логика ломается 
+                        new.push(StackVar::quote(*program_id, inner.clone_change_id().apply_replacement(replacement)));
+                        // new.push(old);
                     } else {
                         new.push(old);
                     }

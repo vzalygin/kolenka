@@ -37,7 +37,7 @@ pub(crate) fn construct_hir<'n>(
 
     let std_read_id = *decls.get(STD_READ_FN_NAME).unwrap();
     let std_print_id = *decls.get(STD_PRINT_FN_NAME).unwrap();
-    hir.insert(std_read_id, HirFunction::std(std_print_id, Some(&STD_READ_FN_NAME.to_string())));
+    hir.insert(std_read_id, HirFunction::std(std_read_id, Some(&STD_READ_FN_NAME.to_string())));
     hir.insert(std_print_id, HirFunction::std(std_print_id, Some(&STD_PRINT_FN_NAME.to_string())));
 
     hir
