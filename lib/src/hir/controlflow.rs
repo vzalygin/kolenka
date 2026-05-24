@@ -8,9 +8,7 @@ use std::collections::HashMap;
 use crate::{
     Context,
     hir::{
-        DeclMap, DefMap,
-        dataflow::{DataFlow, DataFlowMap},
-        structs::{Expr, Hir, HirBaseBlock, HirFunction, Instr, InstrKind, VarKind},
+        DeclMap, DefMap, Var, dataflow::{DataFlow, DataFlowMap}, structs::{Expr, Hir, HirBaseBlock, HirFunction, Instr, InstrKind, VarKind}
     },
     parser::{AstNode, Builtin, Program}, prelude::{STD_PRINT_FN_NAME, STD_READ_FN_NAME},
 };
@@ -208,6 +206,7 @@ pub(crate) fn build_hir_function<'p>(
                         else_local_signature.rets.clone(),
                     ));
                     else_bb.push(Expr::Goto(next_bb.id));
+
                     function.push(curr_bb);
                     function.push(then_bb);
                     function.push(else_bb);
@@ -215,7 +214,33 @@ pub(crate) fn build_hir_function<'p>(
                     curr_bb = next_bb;
                 }
                 Builtin::While => {
-                    // TODO
+                    let var_loop = dfn.unwrap().get_loop().expect("expected loop");
+
+                    let cond_var = var_loop.condition_var;
+                    let (cond_fn_var, cond_signature) = &var_loop.condition;
+                    let (body_fn_var, body_signature) = &var_loop.body;
+                    let VarKind::AnonFn(cond_program_id) = cond_fn_var.kind else {
+                        unreachable!("loop cond expected anon_fn_var")
+                    };
+                    let VarKind::AnonFn(body_program_id) = body_fn_var.kind else {
+                        unreachable!("loop body expected anon_fn_var")
+                    };
+
+                    let mut cond_block = HirBaseBlock::new();
+                    let mut body_block = HirBaseBlock::new();
+                    let next_bb = HirBaseBlock::new();
+
+                    curr_bb.push(Expr::Goto(cond_block.id));
+                    cond_block.push(Expr::Call(cond_program_id, cond_signature.args.clone(), cond_signature.rets.clone()));
+                    cond_block.push(Expr::GotoIf(cond_var, body_block.id, next_bb.id));
+                    body_block.push(Expr::Call(body_program_id, body_signature.args.clone(), body_signature.rets.clone()));
+                    body_block.push(Expr::Goto(cond_block.id));
+
+                    function.push(curr_bb);
+                    function.push(cond_block);
+                    function.push(body_block);
+
+                    curr_bb = next_bb;
                 }
 
                 // Структурные команды -- ничего генерировать не надо, так как весь поток выведен на уровне типов

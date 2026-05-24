@@ -114,6 +114,8 @@ fn infer<'n>(
         }
         None => Ok(Type::trivial()),
     }?;
+    ctx.emit_debug(format!("init node type: {}", prog_type));
+    ctx.emit_debug("---");
 
     for node in nodes.iter().skip(1) {
         ctx.emit_debug(format!("chaining {}", node));
@@ -318,7 +320,7 @@ fn get_node_type<'n>(
                 &mut ctx.step(),
             )?;
             let quote_var_id = quote_type.id;
-            let quote = StackVar::quote(quote_program.id, quote_type.clone());
+            let quote = StackVar::quote(quote_program.id, quote_type.clone_only_inp_out());
 
             // Цитату необходимо добавить как отдельную программу
             defs.insert(quote_program.id, quote_program);
@@ -592,7 +594,8 @@ fn stack_cfg_apply_replacement(old: StackCfg, replacement: &Replacement) -> Stac
                         // UPD Делать замены надо, но как-то аккуратно... quote swap quote compose eval
                         // UPD 2 Проблема скорее в самом dup, из-за которого подстановки решили не делать -- в нем нужно полностью копировать цитату
                         // UPD 3 с учетом чейнинга в таком случае теряется тип копируемой переменной (тк копирование происходит раньше замены). Придумать случай, когда эта логика ломается 
-                        new.push(StackVar::quote(*program_id, inner.clone_change_id().apply_replacement(replacement)));
+                        // new.push(StackVar::quote(*program_id, inner.clone_change_id().apply_replacement(replacement)));
+                        new.push(StackVar::quote(*program_id, inner.clone().apply_replacement(replacement)));
                         // new.push(old);
                     } else {
                         new.push(old);

@@ -34,7 +34,7 @@ impl<'a> std::fmt::Display for DefMap<'a> {
 
 impl std::fmt::Display for Hir {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        for (_, function) in self.iter() {
+        for (_, function) in self.iter().sorted_by_key(|(id, _)| **id) {
             write!(f, "{}", function)?;
         }
 
@@ -159,9 +159,12 @@ impl std::fmt::Display for DataFlowNode {
             ),
             DataFlowNode::Call(signature) => write!(f, "{{ signature {} }}", signature),
             DataFlowNode::CallVar(var, signature) => write!(f, "{{ call {} {} }}", var, signature),
-            DataFlowNode::If(if_) => {
-                write!(f, "{{ if {} {} {} }}", if_.condition, if_.th.0, if_.el.0)
+            DataFlowNode::If(var_if) => {
+                write!(f, "{{ if {} {} {} }}", var_if.condition, var_if.th.0, var_if.el.0)
             }
+            DataFlowNode::Loop(var_loop) => {
+                write!(f, "{{ loop {} {} }}", var_loop.condition.0, var_loop.body.0)
+            },
         }
     }
 }
