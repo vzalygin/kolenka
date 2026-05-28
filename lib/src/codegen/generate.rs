@@ -2,10 +2,10 @@
 
 use std::{collections::{HashMap, HashSet}, fmt::format};
 
-use wasm_encoder::{Function, InstructionSink, RefType, ValType};
+use wasm_encoder::{BlockType, Function, InstructionSink, RefType, ValType};
 use wasmprinter::print_bytes;
 
-use crate::{Context, ProgramId, WasmModule, codegen::{WasmLocalId, WasmType, blocks_graph::{self, BlocksGraph, analyze_blocks_graph}, wasm::{WasmFunctionBundle, WasmFunctionId, WasmModuleBundle}}, hir::{Expr, Hir, HirBaseBlock, HirFunction, Instr, InstrKind, Signature, Var, VarKind}, id::{BlockId, VarId}, prelude::{MAIN_FN_NAME, STD_PRINT_FN_NAME, STD_READ_FN_NAME, WASM_MAIN_FN_NAME, WASM_STD_MODULE_NAME, WASM_STD_PRINT_FN_NAME, WASM_STD_READ_FN_NAME}};
+use crate::{Context, ProgramId, WasmModule, codegen::{WasmLocalId, WasmType, blocks_graph::{self, BlocksGraph, analyze_blocks}, wasm::{WasmFunctionBundle, WasmFunctionId, WasmModuleBundle}}, hir::{Expr, Hir, HirBaseBlock, HirFunction, ExprInstr, InstrKind, Signature, Var, VarKind}, id::{BlockId, VarId}, prelude::{MAIN_FN_NAME, STD_PRINT_FN_NAME, STD_READ_FN_NAME, WASM_MAIN_FN_NAME, WASM_STD_MODULE_NAME, WASM_STD_PRINT_FN_NAME, WASM_STD_READ_FN_NAME}};
 
 pub fn generate_bytecode(program: &Hir, ctx: &mut Context) -> Vec<u8> {
     let mut module = WasmModule::new();
@@ -31,7 +31,7 @@ pub fn generate_bytecode(program: &Hir, ctx: &mut Context) -> Vec<u8> {
 
 fn generate_function(hir: &HirFunction, module_bundle: &WasmModuleBundle, ctx: &mut Context) -> Function {
     let WasmFunctionBundle { blocks, locals, locals_decl } = make_function_bundle(hir);
-    let blocks_graph = analyze_blocks_graph(hir);
+    let blocks_graph = analyze_blocks(hir);
     let mut function = Function::new(locals_decl.clone());
     let mut sink = function.instructions();
 
@@ -151,10 +151,24 @@ fn generate_blocks(
                     },
                 },
                 Expr::Goto(next_id) => {
-                    let next_block = Option::Some(&blocks[next_id]);
-                    if graph.get(next_id).unwrap().predecessors.len() > 1 {
-                        // Если несколько блоков ссылаются на один, то их порядок генерации разруливается на уровне выше
-                        return Option::Some(*next_id);
+                    let mut next_block = Option::Some(&blocks[next_id]);
+                    let graph_next_node = graph.get(next_id).unwrap();
+                    // В настоящее время ассайнимся, что предков может быть только 0, 1 или 2
+                    if graph_next_node.predecessors.len() == 2 {
+                        // Если все предшественники следующей ноды -- доминаторы, то это IF (назад для нее прыгаем)
+                        // Иначе не все предшественники -- доминаторы, тогда это LOOP
+                        if graph_next_node.predecessors.is_subset(&graph_next_node.dominators) {
+                            // IF: если несколько блоков ссылаются на один, то их порядок генерации разруливается на уровне выше
+                            return Option::Some(*next_id);
+                        } else {
+                            // LOOP: ставим блок и внутренний луп и идеи строить цикл
+                            sink.block(BlockType::Empty);
+                            sink.loop_(BlockType::Empty);
+                            // Блок после цикла
+                            let loop_next_block_id = generate_blocks(functions, locals, blocks, graph, sink, visited, next_block, ctx);
+                            next_block = loop_next_block_id.map(|id| blocks.get(&id)).flatten();
+                        }
+
                     }
                     block0 = next_block;
                 },
@@ -162,8 +176,11 @@ fn generate_blocks(
                     let arg = get_local(&locals, &cond.id);
                     let then_block = blocks.get(th);
                     let else_block = blocks.get(el);
+
+                    
+
                     sink.local_get(*arg);
-                    sink.if_(wasm_encoder::BlockType::Empty);
+                    sink.if_(BlockType::Empty);
                     let then_next = generate_blocks(functions, locals, blocks, graph, sink, visited, then_block, ctx);
                     sink.else_();
                     let else_next = generate_blocks(functions, locals, blocks, graph, sink, visited, else_block, ctx);
@@ -268,11 +285,11 @@ fn make_val_type(var: &Var) -> ValType {
     }
 }
 
-fn get_produces(locals: &HashMap<VarId, WasmLocalId>, instr: &Instr) -> WasmLocalId {
+fn get_produces(locals: &HashMap<VarId, WasmLocalId>, instr: &ExprInstr) -> WasmLocalId {
     get_local(locals, &instr.produces.id)
 }
 
-fn get_triple(locals: &HashMap<VarId, WasmLocalId>, instr: &Instr) -> ((WasmLocalId, WasmLocalId), WasmLocalId) {
+fn get_triple(locals: &HashMap<VarId, WasmLocalId>, instr: &ExprInstr) -> ((WasmLocalId, WasmLocalId), WasmLocalId) {
     (
         (
             get_local(locals, &instr.consumes.0.id),

@@ -61,9 +61,9 @@ impl<'w> Context<'w> {
             writeln!(
                 self.writer,
                 "{}{} {}",
-                "debug".truecolor(0, 10, 10),
+                "dbg".truecolor(0, 10, 10),
                 self.indent,
-                msg.into()
+                msg.into().trim().replace("\n", format!("{}{} ", "\ndbg".truecolor(0, 10, 10), self.indent).as_str())
             )
             .expect("cannot emit debug log");
         }
