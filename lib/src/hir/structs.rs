@@ -77,11 +77,30 @@ impl HirBaseBlock {
 
 #[derive(Debug, Clone)]
 pub enum Expr {
-    Goto(BlockId),                 // Безусловно перейти в блок
-    GotoIf(Var, BlockId, BlockId), // По условию 0 перейти в 1 или 2
-    Instr(Instr),
-    Call(ProgramId, Vec<Var>, Vec<Var>),
+    Goto(ExprGoto),     // Безусловно перейти в блок
+    GotoIf(ExprGotoIf), // По условию 0 перейти в 1 или 2
+    Instr(ExprInstr),
+    Call(ExprCall),
     Return,
+}
+
+#[derive(Debug, Clone)]
+pub struct ExprGoto {
+    pub(crate) next: BlockId,
+}
+
+#[derive(Debug, Clone)]
+pub struct ExprGotoIf {
+    pub(crate) cond: Var, 
+    pub(crate) then_block: BlockId,
+    pub(crate) else_block: BlockId,
+}
+
+#[derive(Debug, Clone)]
+pub struct ExprCall {
+    pub(crate) prog_id: ProgramId,
+    pub(crate) args: Vec<Var>,
+    pub(crate) rets: Vec<Var>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -102,16 +121,16 @@ impl Var {
 
 /// Инструкция трехадресного кода
 #[derive(Debug, Clone)]
-pub struct Instr {
+pub struct ExprInstr {
     pub(crate) id: InstrId,
     pub(crate) kind: InstrKind,
     pub(crate) produces: Var,
     pub(crate) consumes: (Var, Var),
 }
 
-impl Instr {
-    pub(crate) fn new(id: InstrId, kind: InstrKind, produces: Var, consumes: (Var, Var)) -> Instr {
-        Instr {
+impl ExprInstr {
+    pub(crate) fn new(id: InstrId, kind: InstrKind, produces: Var, consumes: (Var, Var)) -> ExprInstr {
+        ExprInstr {
             id,
             kind,
             produces,
@@ -119,8 +138,8 @@ impl Instr {
         }
     }
 
-    pub(crate) fn imm_int(produces: Var, i: i32) -> Instr {
-        Instr::new(
+    pub(crate) fn imm_int(produces: Var, i: i32) -> ExprInstr {
+        ExprInstr::new(
             InstrId::new(),
             InstrKind::ConstInt(i),
             produces,
@@ -128,8 +147,8 @@ impl Instr {
         )
     }
 
-    pub(crate) fn imm_bool(produces: Var, b: bool) -> Instr {
-        Instr::new(
+    pub(crate) fn imm_bool(produces: Var, b: bool) -> ExprInstr {
+        ExprInstr::new(
             InstrId::new(),
             InstrKind::ConstBool(b),
             produces,
@@ -137,8 +156,8 @@ impl Instr {
         )
     }
 
-    pub(crate) fn op(kind: InstrKind, ret: Var, args: (Var, Var)) -> Instr {
-        Instr::new(InstrId::new(), kind, ret, args)
+    pub(crate) fn op(kind: InstrKind, ret: Var, args: (Var, Var)) -> ExprInstr {
+        ExprInstr::new(InstrId::new(), kind, ret, args)
     }
 }
 

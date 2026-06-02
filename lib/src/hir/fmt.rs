@@ -1,9 +1,7 @@
 use itertools::Itertools;
 
 use crate::hir::{
-    DeclMap, DefMap,
-    dataflow::{DataFlowNode, Signature},
-    structs::{Expr, Hir, HirFunction, Instr, InstrKind, Var, VarKind},
+    DeclMap, DefMap, ExprCall, ExprGoto, ExprGotoIf, dataflow::{DataFlowNode, Signature}, structs::{Expr, ExprInstr, Hir, HirFunction, InstrKind, Var, VarKind}
 };
 
 impl std::fmt::Display for DeclMap {
@@ -78,7 +76,7 @@ impl std::fmt::Display for HirFunction {
     }
 }
 
-impl std::fmt::Display for Instr {
+impl std::fmt::Display for ExprInstr {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let ret = self.produces;
         let (lhs, rhs) = self.consumes;
@@ -176,26 +174,26 @@ impl Expr {
         returns: &String,
     ) -> std::fmt::Result {
         match self {
-            Expr::Goto(block_id) => {
-                write!(f, "goto {};", block_id)
+            Expr::Goto(ExprGoto { next }) => {
+                write!(f, "goto {};", next)
             }
-            Expr::GotoIf(var, then_block, else_block) => {
+            Expr::GotoIf(ExprGotoIf { cond, then_block, else_block }) => {
                 write!(
                     f,
                     "if {} then goto {}; else goto {};",
-                    var, then_block, *else_block
+                    cond, then_block, *else_block
                 )
             }
             Expr::Instr(instr) => {
                 write!(f, "{};", instr)
             }
-            Expr::Call(program_id, consumes, produces) => {
+            Expr::Call(ExprCall { prog_id, args: consumes, rets: produces }) => {
                 let args = consumes.iter().map(|var| format!("{}", var)).join(", ");
                 let rets = produces.iter().map(|var| format!("{}", var)).join(", ");
                 if rets.is_empty() {
-                    write!(f, "call fn{}({});", program_id, args)
+                    write!(f, "call fn{}({});", prog_id, args)
                 } else {
-                    write!(f, "{} = call fn{}({});", rets, program_id, args)
+                    write!(f, "{} = call fn{}({});", rets, prog_id, args)
                 }
             }
             Expr::Return => {

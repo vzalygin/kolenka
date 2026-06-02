@@ -242,6 +242,8 @@ fn analyze_program_dataflow<'n>(
 
         let mut stack_inp = stack_inp.iter().rev();
         let mut stack_out = stack_out.iter().rev();
+        
+        let mut ctx = ctx.step();
 
         match node {
             AstNode::Int { id, value: _ } | AstNode::Bool { id, value: _ } => {

@@ -18,7 +18,7 @@ mod dataflow;
 mod fmt;
 mod structs;
 
-pub(crate) use crate::hir::{structs::{DeclMap, DefMap, Hir, Var, VarKind, HirFunction, HirBaseBlock, Expr, Instr, InstrKind}, dataflow::{Signature, DataFlow}};
+pub(crate) use crate::hir::{structs::{DeclMap, DefMap, Hir, Var, VarKind, HirFunction, HirBaseBlock, Expr, ExprInstr, ExprGoto, ExprGotoIf, ExprCall, InstrKind}, dataflow::{Signature, DataFlow}};
 
 /*
 Пусть у нас программа

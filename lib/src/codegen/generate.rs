@@ -5,7 +5,7 @@ use std::{collections::{HashMap, HashSet}, fmt::format};
 use wasm_encoder::{BlockType, Function, InstructionSink, RefType, ValType};
 use wasmprinter::print_bytes;
 
-use crate::{Context, ProgramId, WasmModule, codegen::{WasmLocalId, WasmType, blocks_graph::{self, BlocksGraph, analyze_blocks}, wasm::{WasmFunctionBundle, WasmFunctionId, WasmModuleBundle}}, hir::{Expr, Hir, HirBaseBlock, HirFunction, ExprInstr, InstrKind, Signature, Var, VarKind}, id::{BlockId, VarId}, prelude::{MAIN_FN_NAME, STD_PRINT_FN_NAME, STD_READ_FN_NAME, WASM_MAIN_FN_NAME, WASM_STD_MODULE_NAME, WASM_STD_PRINT_FN_NAME, WASM_STD_READ_FN_NAME}};
+use crate::{Context, ProgramId, WasmModule, codegen::{WasmLocalId, WasmType, blocks_graph::{self, BlocksGraph, analyze_blocks}, wasm::{WasmFunctionBundle, WasmFunctionId, WasmModuleBundle}}, hir::{Expr, ExprCall, ExprGoto, ExprGotoIf, ExprInstr, Hir, HirBaseBlock, HirFunction, InstrKind, Signature, Var, VarKind}, id::{BlockId, VarId}, prelude::{MAIN_FN_NAME, STD_PRINT_FN_NAME, STD_READ_FN_NAME, WASM_MAIN_FN_NAME, WASM_STD_MODULE_NAME, WASM_STD_PRINT_FN_NAME, WASM_STD_READ_FN_NAME}};
 
 pub fn generate_bytecode(program: &Hir, ctx: &mut Context) -> Vec<u8> {
     let mut module = WasmModule::new();
@@ -34,18 +34,18 @@ fn generate_function(hir: &HirFunction, module_bundle: &WasmModuleBundle, ctx: &
     let blocks_graph = analyze_blocks(hir);
     let mut function = Function::new(locals_decl.clone());
     let mut sink = function.instructions();
+    let init_block = hir.blocks.first();
 
     ctx.emit_debug(format!("locals {:?}", locals));
     ctx.emit_debug(format!("locals_decl {:?}", locals_decl));
 
-    generate_blocks(
+    dispatch(
         &module_bundle.functions,
         &locals,
         &blocks,
         &blocks_graph,
         &mut sink,
-        &mut HashSet::new(),
-        hir.blocks.first(),
+        init_block,
         ctx
     );
 
@@ -58,31 +58,115 @@ fn generate_function(hir: &HirFunction, module_bundle: &WasmModuleBundle, ctx: &
     function
 }
 
-/// По сути обход в ширину
+/// Функция для каждого блока определяет, не является ли он началом какой-то конструкции нелинейного потока управления
 /// 
-/// Возвращает блок, который надо посетить.
-fn generate_blocks(
+/// Всего таких конструкций на уровне wasm пока 2:
+/// 1. IF
+/// 2. WHILE
+/// 
+/// Если встречает признак начала конструкции (переход к блоку начала конструкции), то вызывает обработчик такой конструкции
+fn dispatch(
     functions: &HashMap<ProgramId, WasmFunctionId>,
     locals: &HashMap<VarId, WasmLocalId>,
     blocks: &HashMap<BlockId, HirBaseBlock>,
     graph: &BlocksGraph,
     sink: &mut InstructionSink<'_>,
-    visited: &mut HashSet<BlockId>,
     init: Option<&HirBaseBlock>,
     ctx: &mut Context
-) -> Option<BlockId> {
-    let mut block0: Option<&HirBaseBlock> = init;
-
+) {
+    let mut block0 = init;
     while let Some(block) = block0 {
-        ctx.emit_debug(format!("generate block {}", block.id));
-        assert!(!visited.contains(&block.id), "control flow build failed");
-        visited.insert(block.id);
+        let expr = generate_block(functions, locals, sink, block, ctx);
+        let mut next_block: Option<&HirBaseBlock> = Option::None;
+        
+        // Признак IF -- блок заканчивается на GotoIf
+        if let Expr::GotoIf(goto_if) = expr {
+            let next_block_id = generate_if(functions, locals, blocks, graph, sink, goto_if, ctx);
+            next_block = blocks.get(next_block_id);
+        }
 
-        let ctx = &mut ctx.step();
-        for expr in &block.exprs {
-            ctx.emit_debug(format!("expr {}", expr));
-            match expr {
-                Expr::Instr(instr) => match instr.kind {
+        // Признак LOOP -- блок заканчивается на GOTO в блок, у которого несколько предшественников и хотя бы один из них не является доминатором
+        // (то есть предшественник из будущего, который обеспечивает возврат назад)
+        if let Expr::Goto(goto) = expr {
+            let graph_next_node = graph.get(&goto.next).unwrap();
+            let next_block_id = if graph_next_node.predecessors.len() == 2 && !graph_next_node.predecessors.is_subset(&graph_next_node.dominators) {
+                generate_loop(functions, locals, blocks, graph, sink, goto, ctx)
+            } else {
+                &goto.next
+            };
+            next_block = blocks.get(next_block_id);
+        }
+
+        block0 = next_block;
+    }
+}
+
+fn generate_if<'a>(
+    functions: &HashMap<ProgramId, WasmFunctionId>,
+    locals: &HashMap<VarId, WasmLocalId>,
+    blocks: &'a HashMap<BlockId, HirBaseBlock>,
+    graph: &BlocksGraph,
+    sink: &mut InstructionSink<'_>,
+    goto_if: &ExprGotoIf,
+    ctx: &mut Context
+) -> &'a BlockId {
+    let ExprGotoIf { cond, then_block, else_block } = goto_if;
+    let arg = get_local(&locals, &cond.id);
+    let then_block = blocks.get(then_block).unwrap();
+    let else_block = blocks.get(else_block).unwrap();
+
+    sink.local_get(*arg);
+    sink.if_(BlockType::Empty);
+    let Expr::Goto(ExprGoto { next: then_next }) = generate_block(functions, locals, sink, then_block, ctx) else {
+        unreachable!("if then branch expected goto block")
+    };
+    sink.else_();
+    let Expr::Goto(ExprGoto { next: else_next }) = generate_block(functions, locals, sink, else_block, ctx) else {
+        unreachable!("if else branch expected goto block")
+    };
+    sink.end();
+    assert!(then_next == else_next, "control flow convergence failed");
+    
+    then_next
+}
+
+fn generate_loop<'a>(
+    functions: &HashMap<ProgramId, WasmFunctionId>,
+    locals: &HashMap<VarId, WasmLocalId>,
+    blocks: &'a HashMap<BlockId, HirBaseBlock>,
+    graph: &BlocksGraph,
+    sink: &mut InstructionSink<'_>,
+    goto: &ExprGoto, // ссылка на начальный блок с условием
+    ctx: &mut Context
+) -> &'a BlockId {
+    sink.block(BlockType::Empty)
+        .loop_(BlockType::Empty);
+    let Expr::GotoIf(ExprGotoIf { cond, then_block, else_block }) = generate_block(functions, locals, sink, blocks.get(&goto.next).unwrap(), ctx) else {
+        unreachable!("loop cond expected goto if block")
+    };
+    let cond = *locals.get(&cond.id).unwrap();
+    sink.local_get(*cond)
+        .i32_eqz()
+        .br_if(1);
+    let _ = generate_block(functions, locals, sink, blocks.get(&then_block).unwrap(), ctx);
+    sink.br(0)
+        .end()
+        .end();
+
+    else_block
+}
+
+fn generate_block<'a>(
+    functions: &HashMap<ProgramId, WasmFunctionId>,
+    locals: &HashMap<VarId, WasmLocalId>,
+    sink: &mut InstructionSink<'_>,
+    block: &'a HirBaseBlock,
+    ctx: &mut Context
+) -> &'a Expr {
+    for expr in &block.exprs {
+        match expr {
+            Expr::Instr(instr) => {
+                match instr.kind {
                     InstrKind::ConstInt(i) => {
                         let res = get_produces(&locals, instr);
                         sink.i32_const(i)
@@ -149,62 +233,23 @@ fn generate_blocks(
                             .i32_ge_s()
                             .local_set(*res);
                     },
-                },
-                Expr::Goto(next_id) => {
-                    let mut next_block = Option::Some(&blocks[next_id]);
-                    let graph_next_node = graph.get(next_id).unwrap();
-                    // В настоящее время ассайнимся, что предков может быть только 0, 1 или 2
-                    if graph_next_node.predecessors.len() == 2 {
-                        // Если все предшественники следующей ноды -- доминаторы, то это IF (назад для нее прыгаем)
-                        // Иначе не все предшественники -- доминаторы, тогда это LOOP
-                        if graph_next_node.predecessors.is_subset(&graph_next_node.dominators) {
-                            // IF: если несколько блоков ссылаются на один, то их порядок генерации разруливается на уровне выше
-                            return Option::Some(*next_id);
-                        } else {
-                            // LOOP: ставим блок и внутренний луп и идеи строить цикл
-                            sink.block(BlockType::Empty);
-                            sink.loop_(BlockType::Empty);
-                            // Блок после цикла
-                            let loop_next_block_id = generate_blocks(functions, locals, blocks, graph, sink, visited, next_block, ctx);
-                            next_block = loop_next_block_id.map(|id| blocks.get(&id)).flatten();
-                        }
-
-                    }
-                    block0 = next_block;
-                },
-                Expr::GotoIf(cond, th, el) => {
-                    let arg = get_local(&locals, &cond.id);
-                    let then_block = blocks.get(th);
-                    let else_block = blocks.get(el);
-
-                    
-
-                    sink.local_get(*arg);
-                    sink.if_(BlockType::Empty);
-                    let then_next = generate_blocks(functions, locals, blocks, graph, sink, visited, then_block, ctx);
-                    sink.else_();
-                    let else_next = generate_blocks(functions, locals, blocks, graph, sink, visited, else_block, ctx);
-                    sink.end();
-                    assert!(then_next == else_next, "control flow convergence failed");
-                    block0 = then_next.map(|next_id| &blocks[&next_id]);
-                },
-                Expr::Call(program_id, args, rets) => {
-                    for arg in args {
-                        sink.local_get(*get_local(&locals, &arg.id));
-                    }
-                    sink.call(*functions[program_id]);
-                    for ret in rets {
-                        sink.local_set(*get_local(&locals, &ret.id));
-                    }
-                },
-                Expr::Return => {
-                    block0 = Option::None;
-                },
-            }
+                }
+            },
+            Expr::Call(ExprCall { prog_id: prog, args, rets } ) => {
+                for arg in args {
+                    sink.local_get(*get_local(&locals, &arg.id));
+                }
+                sink.call(**functions.get(prog).unwrap());
+                for ret in rets.iter().rev() {
+                    sink.local_set(*get_local(&locals, &ret.id));
+                }
+            },
+            Expr::Return | Expr::Goto(_) | Expr::GotoIf(_) => {
+            },
         }
     }
 
-    Option::None
+    block.exprs.last().unwrap()
 }
 
 fn make_module_bundle(module: &mut WasmModule, program: &Hir) -> WasmModuleBundle {
