@@ -18,7 +18,7 @@ mod dataflow;
 mod fmt;
 mod structs;
 
-pub(crate) use crate::hir::{structs::{DeclMap, DefMap, Hir, Var, VarKind, HirFunction, HirBaseBlock, Expr, Instr, InstrKind}, dataflow::{Signature, DataFlow}};
+pub(crate) use crate::hir::{structs::{DeclMap, DefMap, Hir, Var, VarKind, HirFunction, HirBaseBlock, Expr, ExprInstr, ExprGoto, ExprGotoIf, ExprCall, InstrKind}, dataflow::{Signature, DataFlow}};
 
 /*
 Пусть у нас программа
@@ -68,7 +68,7 @@ pub fn build_hir(
     hir_ctx: &mut Context,
 ) -> Result<Hir, CompilerError> {
     hir_ctx.emit_debug("generate hir".to_string());
-    let (mut defs, decls) = init_definitions(ast, hir_ctx);
+    let (mut defs, decls) = init_definitions(ast, hir_ctx)?;
     hir_ctx.emit_debug(format!("init definitions {}", defs));
     hir_ctx.emit_debug("===".to_string());
     let types =
@@ -85,7 +85,7 @@ pub fn build_hir(
     Ok(hir)
 }
 
-fn init_definitions<'p>(ast: &'p Ast, ctx: &mut Context) -> (DefMap<'p>, DeclMap) {
+fn init_definitions<'p>(ast: &'p Ast, ctx: &mut Context) -> Result<(DefMap<'p>, DeclMap), CompilerError> {
     let mut defs = DefMap(HashMap::new());
     let mut decl = DeclMap(HashMap::new(), HashMap::new());
 
@@ -104,12 +104,15 @@ fn init_definitions<'p>(ast: &'p Ast, ctx: &mut Context) -> (DefMap<'p>, DeclMap
         } = node
         {
             ctx.emit_debug(format!("define {}", name));
+            if decl.0.contains_key(name) {
+                return Err(CompilerError::MultipleDefinitionError { name: name.clone() });
+            }
             add_decl(&mut decl, name.clone(), program.id);
             defs.insert(program.id, program);
         }
     }
 
-    (defs, decl)
+    Ok((defs, decl))
 }
 
 fn add_decl(decl: &mut DeclMap, name: String, id: ProgramId) {

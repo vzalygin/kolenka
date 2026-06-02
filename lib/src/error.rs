@@ -10,4 +10,6 @@ pub enum CompilerError {
     TypingError(TypingError),
     #[error("logic error: {description}")]
     LogicError { description: String },
+    #[error("multiple definition {name}")]
+    MultipleDefinitionError { name: String },
 }

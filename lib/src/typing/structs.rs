@@ -1,4 +1,5 @@
 //! Модель типов.
+//! BIG TODO пробежаться и сделать замену term -> var
 
 use std::collections::HashMap;
 
@@ -48,17 +49,20 @@ impl Type {
         (self.seq.first().unwrap(), self.seq.last().unwrap())
     }
 
-    pub(crate) fn clone_inp_out(&self) -> Type {
+    // Клонирование, но только входной и выходной конфигураций
+    pub(crate) fn clone_only_inp_out(&self) -> Type {
         let (inp, out) = self.inp_out();
         Type::from_inp_out(inp.clone(), out.clone())
     }
 
-    pub(crate) fn clone_id(&self) -> Type {
+    // Клонирование с заменой идентификаторов `VarId` 
+    pub(crate) fn clone_change_id(&self) -> Type {
         let mut replacements = HashMap::new();
-        self.clone_id_internal(&mut replacements)
+        self.clone_change_id_internal(&mut replacements)
     }
 
-    fn clone_id_internal(&self, replacements: &mut HashMap<StackVar, StackVar>) -> Type {
+    /// При клонировании надо делать замены переменных (например, bool 17 -> bool 24) 
+    fn clone_change_id_internal(&self, replacements: &mut HashMap<StackVar, StackVar>) -> Type {
         let new_seq: Vec<StackCfg> = self
             .seq
             .iter()
@@ -67,24 +71,15 @@ impl Type {
                     stack_cfg
                         .0
                         .iter()
-                        .map(|term| {
-                            let replacement = replacements.get(term);
+                        .map(|var| {
+                            let replacement = replacements.get(var);
 
                             if let Some(replacement) = replacement {
                                 replacement.clone()
                             } else {
-                                let replacement = match term {
-                                    StackVar::Tail(_) => StackVar::tail(),
-                                    StackVar::Var(_) => StackVar::var(),
-                                    StackVar::Quote { program_id, inner } => StackVar::quote(
-                                        *program_id,
-                                        inner.clone_id_internal(replacements),
-                                    ),
-                                    StackVar::Int(_) => StackVar::int(),
-                                    StackVar::Bool(_) => StackVar::bool(),
-                                };
+                                let replacement = var.clone_change_id_internal(replacements);
                                 replacements
-                                    .entry(term.clone())
+                                    .entry(var.clone())
                                     .or_insert(replacement)
                                     .clone()
                             }
@@ -151,4 +146,24 @@ impl StackVar {
     pub(crate) fn bool() -> StackVar {
         StackVar::Bool(VarId::new())
     }
+
+    /// Клон с сохранением инварианта, но с заменой идентификаторов VarId. ProgramId при этом сохраняется
+    pub(crate) fn clone_change_id(&self) -> StackVar {
+        let mut replacements = HashMap::new();
+        self.clone_change_id_internal(&mut replacements)
+    }
+
+    fn clone_change_id_internal(&self, replacements: &mut HashMap<StackVar, StackVar>) -> StackVar {
+        match self {
+            StackVar::Tail(_) => StackVar::tail(),
+            StackVar::Var(_) => StackVar::var(),
+            StackVar::Quote { program_id, inner } => StackVar::quote(
+                *program_id,
+                inner.clone_change_id_internal(replacements),
+            ),
+            StackVar::Int(_) => StackVar::int(),
+            StackVar::Bool(_) => StackVar::bool(),
+        }
+    }
+
 }

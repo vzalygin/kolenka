@@ -113,11 +113,11 @@ impl AstNode {
 impl std::fmt::Display for AstNode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            AstNode::Int { id, value } => write!(f, "(id{} {})", id, value),
-            AstNode::Bool { id, value } => write!(f, "(id{} {})", id, value),
-            AstNode::BuiltinIdentifier { id, value } => write!(f, "(id{} {})", id, value),
-            AstNode::Identifier { id, value } => write!(f, "(id{} {})", id, value),
-            AstNode::Quote { id, value } => write!(f, "[id{} {}]", id, value),
+            AstNode::Int { id, value } => write!(f, "(id{} int {})", id, value),
+            AstNode::Bool { id, value } => write!(f, "(id{} bool {})", id, value),
+            AstNode::BuiltinIdentifier { id, value } => write!(f, "(id{} builtin {})", id, value),
+            AstNode::Identifier { id, value } => write!(f, "(id{} ident {})", id, value),
+            AstNode::Quote { id, value } => write!(f, "(id{} quote {}])", id, value),
             AstNode::Define { id, name: _, value } => write!(f, "(id{} define {})", id, value),
         }
     }
@@ -289,10 +289,10 @@ fn builtin<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, AstNo
             map(tag("-"), |_| Builtin::Sub),
             map(tag("*"), |_| Builtin::Mul),
             map(tag("/"), |_| Builtin::Div),
-            map(tag("<"), |_| Builtin::Less),
             map(tag("<="), |_| Builtin::LessOrEq),
-            map(tag(">"), |_| Builtin::Great),
             map(tag(">="), |_| Builtin::GreatOrEq),
+            map(tag("<"), |_| Builtin::Less),
+            map(tag(">"), |_| Builtin::Great),
             map(tag("pop"), |_| Builtin::Pop),
             map(tag("dup"), |_| Builtin::Dup),
             map(tag("swap"), |_| Builtin::Swap),

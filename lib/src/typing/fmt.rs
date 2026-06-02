@@ -21,13 +21,18 @@ struct Naming<'t> {
 
 impl<'t> Naming<'t> {
     fn new() -> Naming<'t> {
+        // Naming {
+        //     term_names: HashMap::new(),
+        //     // TODO Придумать, если перестанет хватать букв
+        //     stack_names_it: std::iter::successors(Some('A'), |&prev| {
+        //         Some((prev as u8 + 1) as char)
+        //     }),
+        //     var_names_it: std::iter::successors(Some('a'), |&prev| Some((prev as u8 + 1) as char)),
+        // }
         Naming {
             term_names: HashMap::new(),
-            // TODO Придумать, если перестанет хватать букв
-            stack_names_it: std::iter::successors(Some('A'), |&prev| {
-                Some((prev as u8 + 1) as char)
-            }),
-            var_names_it: std::iter::successors(Some('a'), |&prev| Some((prev as u8 + 1) as char)),
+            stack_names_it: std::iter::successors(Some('S'), |&prev| {Some(prev)}),
+            var_names_it: std::iter::successors(Some('a'), |&prev| Some(prev)),
         }
     }
 }

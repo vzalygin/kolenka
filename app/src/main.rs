@@ -1,5 +1,3 @@
-mod wasm;
-
 use colored::Colorize;
 use std::{
     env, fs::File, io::{self, Write}

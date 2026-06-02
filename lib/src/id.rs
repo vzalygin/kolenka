@@ -10,7 +10,7 @@ static GLOBAL_INSTR_ID: AtomicU32 = AtomicU32::new(0);
 static GLOBAL_VAR_ID: AtomicU32 = AtomicU32::new(0);
 static GLOBAL_BLOCK_ID: AtomicU32 = AtomicU32::new(0);
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Deref, DerefMut)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Deref, DerefMut)]
 pub struct ProgramId(u32);
 
 impl ProgramId {
@@ -25,7 +25,7 @@ impl std::fmt::Display for ProgramId {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Deref, DerefMut)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Deref, DerefMut)]
 pub struct NodeId(u32);
 
 impl NodeId {
@@ -40,7 +40,7 @@ impl std::fmt::Display for NodeId {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Deref, DerefMut)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Deref, DerefMut)]
 pub struct InstrId(u32);
 
 impl InstrId {
@@ -55,7 +55,7 @@ impl std::fmt::Display for InstrId {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Deref, DerefMut)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Deref, DerefMut)]
 pub struct VarId(u32);
 
 impl VarId {
@@ -70,7 +70,7 @@ impl std::fmt::Display for VarId {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Deref, DerefMut)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Deref, DerefMut)]
 pub struct BlockId(u32);
 
 impl BlockId {

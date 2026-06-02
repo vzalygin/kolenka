@@ -8,9 +8,7 @@ use std::collections::HashMap;
 use crate::{
     Context,
     hir::{
-        DeclMap, DefMap,
-        dataflow::{DataFlow, DataFlowMap},
-        structs::{Expr, Hir, HirBaseBlock, HirFunction, Instr, InstrKind, VarKind},
+        DeclMap, DefMap, Var, dataflow::{DataFlow, DataFlowMap}, structs::{Expr, ExprCall, ExprGoto, ExprGotoIf, ExprInstr, Hir, HirBaseBlock, HirFunction, InstrKind, VarKind}
     },
     parser::{AstNode, Builtin, Program}, prelude::{STD_PRINT_FN_NAME, STD_READ_FN_NAME},
 };
@@ -37,28 +35,28 @@ pub(crate) fn construct_hir<'n>(
 
     let std_read_id = *decls.get(STD_READ_FN_NAME).unwrap();
     let std_print_id = *decls.get(STD_PRINT_FN_NAME).unwrap();
-    hir.insert(std_read_id, HirFunction::std(std_print_id, Some(&STD_READ_FN_NAME.to_string())));
+    hir.insert(std_read_id, HirFunction::std(std_read_id, Some(&STD_READ_FN_NAME.to_string())));
     hir.insert(std_print_id, HirFunction::std(std_print_id, Some(&STD_PRINT_FN_NAME.to_string())));
 
     hir
 }
 
 pub(crate) fn build_hir_function<'p>(
-    program: &'p Program,
+    prog: &'p Program,
     dataflow: &'p DataFlow,
     decls: &'p DeclMap,
     ctx: &mut Context,
 ) -> HirFunction {
-    ctx.emit_debug(format!("building function {}", program.id));
+    ctx.emit_debug(format!("building function {}", prog.id));
 
     let mut function = HirFunction::empty(
-        program.id,
-        decls.revmap().get(&program.id),
+        prog.id,
+        decls.revmap().get(&prog.id),
         dataflow.clone(),
     );
     let mut curr_bb = HirBaseBlock::new();
 
-    for node in program.iter() {
+    for node in prog.iter() {
         let node_id = node.get_id();
         let dfn = dataflow.nodes.get(node_id);
 
@@ -76,25 +74,25 @@ pub(crate) fn build_hir_function<'p>(
             // TODO точно ли нужны эти идентификаторы?
             AstNode::Int { id: _, value } => {
                 let var = *dfn.unwrap().get_producer().expect("expected int producer");
-                curr_bb.push(Expr::Instr(Instr::imm_int(var, *value)));
+                curr_bb.push(Expr::Instr(ExprInstr::imm_int(var, *value)));
             }
             AstNode::Bool { id: _, value } => {
-                let var = *dfn.unwrap().get_producer().expect("expected int producer");
-                curr_bb.push(Expr::Instr(Instr::imm_bool(var, *value)));
+                let var = *dfn.unwrap().get_producer().expect("expected bool producer");
+                curr_bb.push(Expr::Instr(ExprInstr::imm_bool(var, *value)));
             }
             AstNode::Identifier { id: _, value } => {
                 let program_id = *decls.get(value).unwrap();
                 let local_signature = dfn.unwrap().get_call().expect("expected call");
-                curr_bb.push(Expr::Call(
-                    program_id,
-                    local_signature.args.clone(),
-                    local_signature.rets.clone(),
-                ));
+                curr_bb.push(Expr::Call(ExprCall {
+                    prog_id: program_id,
+                    args: local_signature.args.clone(),
+                    rets: local_signature.rets.clone(),
+                }));
             }
             AstNode::BuiltinIdentifier { id: _, value } => match value {
                 Builtin::Add => {
                     let triple = dfn.unwrap().get_triple().expect("expected add triple");
-                    curr_bb.push(Expr::Instr(Instr::op(
+                    curr_bb.push(Expr::Instr(ExprInstr::op(
                         InstrKind::Add,
                         triple.ret,
                         triple.args,
@@ -102,7 +100,7 @@ pub(crate) fn build_hir_function<'p>(
                 }
                 Builtin::Sub => {
                     let triple = dfn.unwrap().get_triple().expect("expected sub triple");
-                    curr_bb.push(Expr::Instr(Instr::op(
+                    curr_bb.push(Expr::Instr(ExprInstr::op(
                         InstrKind::Sub,
                         triple.ret,
                         triple.args,
@@ -110,7 +108,7 @@ pub(crate) fn build_hir_function<'p>(
                 }
                 Builtin::Mul => {
                     let triple = dfn.unwrap().get_triple().expect("expected mul triple");
-                    curr_bb.push(Expr::Instr(Instr::op(
+                    curr_bb.push(Expr::Instr(ExprInstr::op(
                         InstrKind::Mul,
                         triple.ret,
                         triple.args,
@@ -118,7 +116,7 @@ pub(crate) fn build_hir_function<'p>(
                 }
                 Builtin::Div => {
                     let triple = dfn.unwrap().get_triple().expect("expected div triple");
-                    curr_bb.push(Expr::Instr(Instr::op(
+                    curr_bb.push(Expr::Instr(ExprInstr::op(
                         InstrKind::Div,
                         triple.ret,
                         triple.args,
@@ -126,7 +124,7 @@ pub(crate) fn build_hir_function<'p>(
                 }
                 Builtin::Less => {
                     let triple = dfn.unwrap().get_triple().expect("expected less triple");
-                    curr_bb.push(Expr::Instr(Instr::op(
+                    curr_bb.push(Expr::Instr(ExprInstr::op(
                         InstrKind::Less,
                         triple.ret,
                         triple.args,
@@ -137,7 +135,7 @@ pub(crate) fn build_hir_function<'p>(
                         .unwrap()
                         .get_triple()
                         .expect("expected less_or_equal triple");
-                    curr_bb.push(Expr::Instr(Instr::op(
+                    curr_bb.push(Expr::Instr(ExprInstr::op(
                         InstrKind::LessOrEq,
                         triple.ret,
                         triple.args,
@@ -145,7 +143,7 @@ pub(crate) fn build_hir_function<'p>(
                 }
                 Builtin::Great => {
                     let triple = dfn.unwrap().get_triple().expect("expected great triple");
-                    curr_bb.push(Expr::Instr(Instr::op(
+                    curr_bb.push(Expr::Instr(ExprInstr::op(
                         InstrKind::Great,
                         triple.ret,
                         triple.args,
@@ -156,7 +154,7 @@ pub(crate) fn build_hir_function<'p>(
                         .unwrap()
                         .get_triple()
                         .expect("expected great_or_equals triple");
-                    curr_bb.push(Expr::Instr(Instr::op(
+                    curr_bb.push(Expr::Instr(ExprInstr::op(
                         InstrKind::GreatOrEq,
                         triple.ret,
                         triple.args,
@@ -172,11 +170,11 @@ pub(crate) fn build_hir_function<'p>(
                     } else {
                         unreachable!("eval expected anon_fn var")
                     };
-                    curr_bb.push(Expr::Call(
-                        program_id,
-                        local_signature.args.clone(),
-                        local_signature.rets.clone(),
-                    ));
+                    curr_bb.push(Expr::Call(ExprCall {
+                        prog_id: program_id,
+                        args: local_signature.args.clone(),
+                        rets: local_signature.rets.clone()
+                    }));
                 }
                 Builtin::If => {
                     let if_ = dfn.unwrap().get_if().expect("expected if");
@@ -195,19 +193,24 @@ pub(crate) fn build_hir_function<'p>(
                         unreachable!("if else expected anon_fn_var")
                     };
 
-                    curr_bb.push(Expr::GotoIf(bool_var, then_bb.id, else_bb.id));
-                    then_bb.push(Expr::Call(
-                        then_program_id,
-                        then_local_signature.args.clone(),
-                        then_local_signature.rets.clone(),
-                    ));
-                    then_bb.push(Expr::Goto(next_bb.id));
-                    else_bb.push(Expr::Call(
-                        else_program_id,
-                        else_local_signature.args.clone(),
-                        else_local_signature.rets.clone(),
-                    ));
-                    else_bb.push(Expr::Goto(next_bb.id));
+                    curr_bb.push(Expr::GotoIf(ExprGotoIf {
+                        cond: bool_var,
+                        then_block: then_bb.id,
+                        else_block: else_bb.id
+                    }));
+                    then_bb.push(Expr::Call(ExprCall {
+                        prog_id: then_program_id,
+                        args: then_local_signature.args.clone(),
+                        rets: then_local_signature.rets.clone(),
+                    }));
+                    then_bb.push(Expr::Goto(ExprGoto { next: next_bb.id }));
+                    else_bb.push(Expr::Call(ExprCall {
+                        prog_id: else_program_id,
+                        args: else_local_signature.args.clone(),
+                        rets: else_local_signature.rets.clone(),
+                    }));
+                    else_bb.push(Expr::Goto(ExprGoto { next: next_bb.id }));
+
                     function.push(curr_bb);
                     function.push(then_bb);
                     function.push(else_bb);
@@ -215,7 +218,33 @@ pub(crate) fn build_hir_function<'p>(
                     curr_bb = next_bb;
                 }
                 Builtin::While => {
-                    // TODO
+                    let var_loop = dfn.unwrap().get_loop().expect("expected loop");
+
+                    let cond_var = var_loop.condition_var;
+                    let (cond_fn_var, cond_signature) = &var_loop.condition;
+                    let (body_fn_var, body_signature) = &var_loop.body;
+                    let VarKind::AnonFn(cond_program_id) = cond_fn_var.kind else {
+                        unreachable!("loop cond expected anon_fn_var")
+                    };
+                    let VarKind::AnonFn(body_program_id) = body_fn_var.kind else {
+                        unreachable!("loop body expected anon_fn_var")
+                    };
+
+                    let mut cond_block = HirBaseBlock::new();
+                    let mut body_block = HirBaseBlock::new();
+                    let next_bb = HirBaseBlock::new();
+
+                    curr_bb.push(Expr::Goto(ExprGoto { next: cond_block.id }));
+                    cond_block.push(Expr::Call(ExprCall { prog_id: cond_program_id, args: cond_signature.args.clone(), rets: cond_signature.rets.clone() }));
+                    cond_block.push(Expr::GotoIf(ExprGotoIf { cond: cond_var, then_block: body_block.id, else_block: next_bb.id }));
+                    body_block.push(Expr::Call(ExprCall { prog_id: body_program_id, args: body_signature.args.clone(), rets: body_signature.rets.clone() }));
+                    body_block.push(Expr::Goto(ExprGoto { next: cond_block.id }));
+
+                    function.push(curr_bb);
+                    function.push(cond_block);
+                    function.push(body_block);
+
+                    curr_bb = next_bb;
                 }
 
                 // Структурные команды -- ничего генерировать не надо, так как весь поток выведен на уровне типов

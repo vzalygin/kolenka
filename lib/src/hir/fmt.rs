@@ -1,9 +1,7 @@
 use itertools::Itertools;
 
 use crate::hir::{
-    DeclMap, DefMap,
-    dataflow::{DataFlowNode, Signature},
-    structs::{Expr, Hir, HirFunction, Instr, InstrKind, Var, VarKind},
+    DeclMap, DefMap, ExprCall, ExprGoto, ExprGotoIf, dataflow::{DataFlowNode, Signature}, structs::{Expr, ExprInstr, Hir, HirFunction, InstrKind, Var, VarKind}
 };
 
 impl std::fmt::Display for DeclMap {
@@ -34,7 +32,7 @@ impl<'a> std::fmt::Display for DefMap<'a> {
 
 impl std::fmt::Display for Hir {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        for (_, function) in self.iter() {
+        for (_, function) in self.iter().sorted_by_key(|(id, _)| **id) {
             write!(f, "{}", function)?;
         }
 
@@ -63,7 +61,7 @@ impl std::fmt::Display for HirFunction {
         } else {
             &"anon".to_string()
         };
-        writeln!(f, "fn {}({})({}):", *self.id, name, args)?;
+        writeln!(f, "fn{}[{}]({}):", *self.id, name, args)?;
 
         for block in self.iter() {
             write!(f, "{}:", block.id)?;
@@ -78,7 +76,7 @@ impl std::fmt::Display for HirFunction {
     }
 }
 
-impl std::fmt::Display for Instr {
+impl std::fmt::Display for ExprInstr {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let ret = self.produces;
         let (lhs, rhs) = self.consumes;
@@ -130,7 +128,7 @@ impl std::fmt::Display for Var {
                 write!(f, "a{}", *self.id)
             }
             VarKind::AnonFn(program_id) => {
-                write!(f, "fn{}({})", *self.id, *program_id)
+                write!(f, "fn{}", *program_id)
             }
             VarKind::Nothing => {
                 write!(f, "NOTHING{}", *self.id)
@@ -159,9 +157,12 @@ impl std::fmt::Display for DataFlowNode {
             ),
             DataFlowNode::Call(signature) => write!(f, "{{ signature {} }}", signature),
             DataFlowNode::CallVar(var, signature) => write!(f, "{{ call {} {} }}", var, signature),
-            DataFlowNode::If(if_) => {
-                write!(f, "{{ if {} {} {} }}", if_.condition, if_.th.0, if_.el.0)
+            DataFlowNode::If(var_if) => {
+                write!(f, "{{ if {} {} {} }}", var_if.condition, var_if.th.0, var_if.el.0)
             }
+            DataFlowNode::Loop(var_loop) => {
+                write!(f, "{{ loop {} {} }}", var_loop.condition.0, var_loop.body.0)
+            },
         }
     }
 }
@@ -173,26 +174,26 @@ impl Expr {
         returns: &String,
     ) -> std::fmt::Result {
         match self {
-            Expr::Goto(block_id) => {
-                write!(f, "goto {};", block_id)
+            Expr::Goto(ExprGoto { next }) => {
+                write!(f, "goto {};", next)
             }
-            Expr::GotoIf(var, then_block, else_block) => {
+            Expr::GotoIf(ExprGotoIf { cond, then_block, else_block }) => {
                 write!(
                     f,
                     "if {} then goto {}; else goto {};",
-                    var, then_block, *else_block
+                    cond, then_block, *else_block
                 )
             }
             Expr::Instr(instr) => {
                 write!(f, "{};", instr)
             }
-            Expr::Call(program_id, consumes, produces) => {
+            Expr::Call(ExprCall { prog_id, args: consumes, rets: produces }) => {
                 let args = consumes.iter().map(|var| format!("{}", var)).join(", ");
                 let rets = produces.iter().map(|var| format!("{}", var)).join(", ");
                 if rets.is_empty() {
-                    write!(f, "call {}({});", program_id, args)
+                    write!(f, "call fn{}({});", prog_id, args)
                 } else {
-                    write!(f, "{} = call {}({});", rets, program_id, args)
+                    write!(f, "{} = call fn{}({});", rets, prog_id, args)
                 }
             }
             Expr::Return => {

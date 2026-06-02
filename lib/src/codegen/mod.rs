@@ -6,7 +6,7 @@ use std::{collections::HashMap, ops::Deref};
 
 use wasm_encoder::{Function, RefType, ValType};
 
-use crate::{codegen::wasm::{WasmFunctionBundle, WasmModuleBundle}, hir::{Expr, Instr, InstrKind}, id::BlockId};
+use crate::{codegen::wasm::{WasmFunctionBundle, WasmModuleBundle}, hir::{Expr, ExprInstr, InstrKind}, id::BlockId};
 pub(crate) use crate::codegen::wasm::{WasmLocalId, WasmType, WasmTypeId};
 pub use crate::codegen::{wasm::WasmModule, generate::generate_bytecode};
 

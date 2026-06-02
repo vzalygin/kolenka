@@ -35,6 +35,8 @@ pub(crate) enum DataFlowNode {
     CallVar(Var, Signature),
     /// Ветвление с вызовом then и else
     If(VarIf),
+    /// Цикл по условию
+    Loop(VarLoop),
 }
 
 impl DataFlowNode {
@@ -77,6 +79,14 @@ impl DataFlowNode {
             Option::None
         }
     }
+
+    pub(crate) fn get_loop(&self) -> Option<&VarLoop> {
+        if let DataFlowNode::Loop(var_loop) = self {
+            Option::Some(var_loop)
+        } else {
+            Option::None
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -90,6 +100,13 @@ pub(crate) struct VarIf {
     pub(crate) condition: Var,
     pub(crate) th: (Var, Signature),
     pub(crate) el: (Var, Signature),
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct VarLoop {
+    pub(crate) condition_var: Var,
+    pub(crate) condition: (Var, Signature),
+    pub(crate) body: (Var, Signature),
 }
 
 /// Указывает на зависимости переменных от нод
@@ -172,7 +189,7 @@ pub(crate) fn analyze_dataflow<'n>(
                 let t = types.get(program_id).unwrap();
                 (
                     *program_id,
-                    analyze_program_dataflow(decls, &signatures, program, t, &mut ctx.step()),
+                    analyze_program_dataflow(decls, types, &signatures, program, t, &mut ctx.step()),
                 )
             })
             .collect(),
@@ -207,6 +224,7 @@ fn analyze_program_signature(t: &Type, ctx: &mut Context) -> Signature {
 
 fn analyze_program_dataflow<'n>(
     decls: &'n DeclMap,
+    types: &'n TypesMap,
     signatures: &'n SignatureMap,
     program: &'n Program,
     t: &'n Type,
@@ -224,6 +242,8 @@ fn analyze_program_dataflow<'n>(
 
         let mut stack_inp = stack_inp.iter().rev();
         let mut stack_out = stack_out.iter().rev();
+        
+        let mut ctx = ctx.step();
 
         match node {
             AstNode::Int { id, value: _ } | AstNode::Bool { id, value: _ } => {
@@ -264,10 +284,13 @@ fn analyze_program_dataflow<'n>(
                     nodes.insert(*id, dataflow);
                 }
                 Builtin::Eval => {
-                    let (inp, t) = get_var_fn(&mut stack_inp);
+                    // Возможно, стоит считывать переменные не со стека основной программы stack_inp, stack_out,
+                    // а именно с включения подпрограммы, которое сейчас убрано в _
+                    let (inp, prog_id, _) = get_var_fn(&mut stack_inp);
+                    let prog_type = types.get(&prog_id).unwrap();
 
                     let args: Vec<Var> = stack_inp
-                        .take(t.seq.first().unwrap().len() - 1)
+                        .take(prog_type.seq.first().unwrap().len() - 1)
                         .map(build_var)
                         .inspect(|&var| {
                             vars.entry(var.id)
@@ -276,7 +299,7 @@ fn analyze_program_dataflow<'n>(
                         })
                         .collect();
                     let rets: Vec<Var> = stack_out
-                        .take(t.seq.last().unwrap().len() - 1)
+                        .take(prog_type.seq.last().unwrap().len() - 1)
                         .map(build_var)
                         .inspect(|&var| {
                             vars.entry(var.id)
@@ -289,13 +312,16 @@ fn analyze_program_dataflow<'n>(
                     nodes.insert(*id, dataflow);
                 }
                 Builtin::If => {
-                    let (else_branch_var, else_branch_type) = get_var_fn(&mut stack_inp);
-                    let (then_branch_var, then_branch_type) = get_var_fn(&mut stack_inp);
+                    let (else_branch_var, else_program_id, _) = get_var_fn(&mut stack_inp);
+                    let (then_branch_var, then_program_id, _) = get_var_fn(&mut stack_inp);
                     let condition = get_var(&mut stack_inp);
+
+                    let then_prog_type = types.get(&then_program_id).unwrap();
+                    let else_prog_type = types.get(&else_program_id).unwrap();
 
                     let then_args: Vec<Var> = stack_inp
                         .clone()
-                        .take(then_branch_type.seq.first().unwrap().len() - 1)
+                        .take(then_prog_type.seq.first().unwrap().len() - 1)
                         .map(build_var)
                         .inspect(|&var| {
                             vars.entry(var.id)
@@ -305,7 +331,7 @@ fn analyze_program_dataflow<'n>(
                         .collect();
                     let then_rets: Vec<Var> = stack_out
                         .clone()
-                        .take(then_branch_type.seq.last().unwrap().len() - 1)
+                        .take(then_prog_type.seq.last().unwrap().len() - 1)
                         .map(build_var)
                         .inspect(|&var| {
                             vars.entry(var.id)
@@ -316,7 +342,7 @@ fn analyze_program_dataflow<'n>(
 
                     let else_args: Vec<Var> = stack_inp
                         .clone()
-                        .take(else_branch_type.seq.first().unwrap().len() - 1)
+                        .take(else_prog_type.seq.first().unwrap().len() - 1)
                         .map(build_var)
                         .inspect(|&var| {
                             vars.entry(var.id)
@@ -326,7 +352,7 @@ fn analyze_program_dataflow<'n>(
                         .collect();
                     let else_rets: Vec<Var> = stack_out
                         .clone()
-                        .take(else_branch_type.seq.last().unwrap().len() - 1)
+                        .take(else_prog_type.seq.last().unwrap().len() - 1)
                         .map(build_var)
                         .inspect(|&var| {
                             vars.entry(var.id)
@@ -343,9 +369,70 @@ fn analyze_program_dataflow<'n>(
                     nodes.insert(*id, dataflow);
                 }
                 Builtin::While => {
-                    // TODO
-                }
+                    let (body_block_var, body_program_id, body_type) = get_var_fn(&mut stack_inp);
+                    let (cond_block_var, cond_program_id, cond_type) = get_var_fn(&mut stack_inp);
 
+                    let cond_program_type = types.get(&cond_program_id).unwrap();
+                    let body_program_type = types.get(&body_program_id).unwrap();
+
+                    // равнозначно ли тут использовать cond_type и stack_inp ?
+                    let cond_args: Vec<Var> = cond_type.seq.first().unwrap().iter()
+                        .rev()
+                        .clone()
+                        .take(cond_program_type.seq.first().unwrap().len() - 1)
+                        .map(build_var)
+                        .inspect(|&var| {
+                            vars.entry(var.id)
+                                .or_insert(DataFlowVar::new(var))
+                                .push_depends(*id);
+                        })
+                        .collect();
+
+                    let cond_rets: Vec<Var> = cond_type.seq.last().unwrap().iter()
+                        .rev()
+                        .clone()
+                        .take(cond_program_type.seq.last().unwrap().len() - 1)
+                        .map(build_var)
+                        .inspect(|&var| {
+                            vars.entry(var.id)
+                                .or_insert(DataFlowVar::new(var))
+                                .push_produced(*id);
+                        })
+                        .collect();
+                
+                    let condition_var: Var = *cond_rets.first().unwrap();
+
+                    let body_args: Vec<Var> = body_type.seq.first().unwrap().iter()
+                        .rev()
+                        .clone()
+                        .take(body_program_type.seq.first().unwrap().len() - 1)
+                        .map(build_var)
+                        .inspect(|&var| {
+                            vars.entry(var.id)
+                                .or_insert(DataFlowVar::new(var))
+                                .push_depends(*id);
+                        })
+                        .collect();
+                    let body_rets: Vec<Var> = body_type.seq.last().unwrap().iter()
+                        .rev()
+                        .clone()
+                        .take(body_program_type.seq.last().unwrap().len() - 1)
+                        .map(build_var)
+                        .inspect(|&var| {
+                            vars.entry(var.id)
+                                .or_insert(DataFlowVar::new(var))
+                                .push_produced(*id);
+                        })
+                        .collect();
+
+                    let dataflow = DataFlowNode::Loop(VarLoop {
+                        condition_var: condition_var,
+                        condition: (cond_block_var, Signature::new(cond_args, cond_rets)),
+                        body: (body_block_var, Signature::new(body_args, body_rets)),
+                    });
+                    ctx.emit_debug(format!("loop dataflow {}", dataflow));
+                    nodes.insert(*id, dataflow);
+                }
                 Builtin::Pop => {}
                 Builtin::Dup => {}
                 Builtin::Swap => {}
@@ -419,11 +506,11 @@ fn build_var(stack_var: &StackVar) -> Var {
     }
 }
 
-fn get_var_fn<'a>(stack_cfg: &mut impl Iterator<Item = &'a StackVar>) -> (Var, &'a Type) {
+fn get_var_fn<'a>(stack_cfg: &mut impl Iterator<Item = &'a StackVar>) -> (Var, ProgramId, &'a Type) {
     let stack_var = stack_cfg.next().unwrap();
     match stack_var {
         StackVar::Quote { program_id, inner } => {
-            (Var::new(inner.id, VarKind::AnonFn(*program_id)), inner)
+            (Var::new(inner.id, VarKind::AnonFn(*program_id)), *program_id, inner)
         }
         StackVar::Tail(_) | StackVar::Var(_) | StackVar::Int(_) | StackVar::Bool(_) => {
             unreachable!("expected quote term")
