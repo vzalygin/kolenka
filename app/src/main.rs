@@ -52,7 +52,7 @@ fn run(cli: Cli) -> Result<(), Box<dyn Error>> {
 
     if mode == Mode::Compile {
         let bytecode = generate_bytecode(&program, &mut generator_context);
-        let bytecode = merge_with_std(&bytecode)?;
+        let bytecode = merge_with_std(&bytecode, &mut generator_context)?;
         fs::write(output_file, bytecode)?;
     }
 

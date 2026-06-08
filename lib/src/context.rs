@@ -28,7 +28,7 @@ impl<'w> Context<'w> {
         }
     }
 
-    pub(crate) fn step(&mut self) -> Context<'_> {
+    pub fn step(&mut self) -> Context<'_> {
         Context {
             writer: self.writer,
             log_level: self.log_level,
@@ -36,14 +36,14 @@ impl<'w> Context<'w> {
         }
     }
 
-    pub(crate) fn emit_err(&mut self, err: &CompilerError) {
+    pub fn emit_err(&mut self, err: &CompilerError) {
         if self.log_level <= LogLevel::Error {
             writeln!(self.writer, "{}{} {}", "error".red(), self.indent, err)
                 .expect("cannot emit err log");
         }
     }
 
-    pub(crate) fn emit_warn(&mut self, msg: impl Into<String>) {
+    pub fn emit_warn(&mut self, msg: impl Into<String>) {
         if self.log_level <= LogLevel::Warn {
             writeln!(
                 self.writer,
@@ -56,7 +56,7 @@ impl<'w> Context<'w> {
         }
     }
 
-    pub(crate) fn emit_debug(&mut self, msg: impl Into<String>) {
+    pub fn emit_debug(&mut self, msg: impl Into<String>) {
         if self.log_level <= LogLevel::Debug {
             writeln!(
                 self.writer,

@@ -67,18 +67,16 @@ pub fn build_hir(
     typ_ctx: &mut Context,
     hir_ctx: &mut Context,
 ) -> Result<Hir, CompilerError> {
-    hir_ctx.emit_debug("generate hir".to_string());
+    typ_ctx.emit_debug("=== TYPE INFERENCE ===".to_string());
     let (mut defs, decls) = init_definitions(ast, hir_ctx)?;
-    hir_ctx.emit_debug(format!("init definitions {}", defs));
-    hir_ctx.emit_debug("===".to_string());
+    typ_ctx.emit_debug(format!("init definitions {}", defs));
     let types =
         infer_definitions(&decls, &mut defs, typ_ctx).map_err(CompilerError::TypingError)?;
     hir_ctx.emit_debug(format!("declarations {}", decls));
     hir_ctx.emit_debug(format!("definitions {}", defs));
     hir_ctx.emit_debug(format!("types {}", types));
-    hir_ctx.emit_debug("===".to_string());
+    hir_ctx.emit_debug("=== HIR BUILDING ===".to_string());
     let dataflow = analyze_dataflow(&decls, &defs, &types, hir_ctx);
-    hir_ctx.emit_debug("===".to_string());
     let hir = construct_hir(&decls, &defs, &dataflow, hir_ctx);
     hir_ctx.emit_debug(format!("HIR listing\n{}", hir));
     validate_main(&hir, &decls)?;
