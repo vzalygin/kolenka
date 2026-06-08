@@ -10,8 +10,11 @@ use colored::Colorize;
 use lib::{Context, build_hir, generate_bytecode, parse_source};
 
 use crate::cli::{Cli, Mode};
+use crate::merge::merge_with_std;
 
 mod cli;
+mod merge;
+mod std_wasm;
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
@@ -49,16 +52,13 @@ fn run(cli: Cli) -> Result<(), Box<dyn Error>> {
 
     if mode == Mode::Compile {
         let bytecode = generate_bytecode(&program, &mut generator_context);
+        let bytecode = merge_with_std(&bytecode)?;
         fs::write(output_file, bytecode)?;
-    }
-
-    if !quiet {
-        println!("{}", "ok".green());
     }
 
     Ok(())
 }
 
 fn default_output_file(input_file: &Path) -> PathBuf {
-    input_file.with_extension("")
+    input_file.with_extension("wasm")
 }
