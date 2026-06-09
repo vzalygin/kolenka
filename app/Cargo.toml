@@ -9,6 +9,11 @@ authors = [
 [dependencies]
 lib = { path = "../lib" }
 
+clap = { version = "4.5", features = ["derive"] }
 colored = "3"
 wasm-encoder = "0.245"
 derived-deref = "2.1.0"
+tempfile = "3"
+
+[dev-dependencies]
+wasmparser = "0.245"

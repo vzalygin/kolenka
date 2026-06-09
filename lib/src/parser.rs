@@ -172,6 +172,8 @@ impl std::fmt::Display for Builtin {
 }
 
 pub fn parse_source(input: &str, ctx: &mut Context) -> Result<Ast, CompilerError> {
+    ctx.emit_debug("=== AST PARSING ===".to_string());
+
     match program::<VerboseError<&str>>(input).finish() {
         Ok((_, ast)) => {
             ctx.emit_debug(format!("parsed {}", ast.program));
@@ -181,7 +183,6 @@ pub fn parse_source(input: &str, ctx: &mut Context) -> Result<Ast, CompilerError
             let e = CompilerError::ParserError {
                 description: convert_error(input, e),
             };
-            ctx.emit_err(&e);
             Err(e)
         }
     }

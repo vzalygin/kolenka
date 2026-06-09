@@ -8,6 +8,8 @@ use wasmprinter::print_bytes;
 use crate::{Context, ProgramId, WasmModule, codegen::{WasmLocalId, WasmType, blocks_graph::{self, BlocksGraph, analyze_blocks}, wasm::{WasmFunctionBundle, WasmFunctionId, WasmModuleBundle}}, hir::{Expr, ExprCall, ExprGoto, ExprGotoIf, ExprInstr, Hir, HirBaseBlock, HirFunction, InstrKind, Signature, Var, VarKind}, id::{BlockId, VarId}, prelude::{MAIN_FN_NAME, STD_PRINT_FN_NAME, STD_READ_FN_NAME, WASM_MAIN_FN_NAME, WASM_STD_MODULE_NAME, WASM_STD_PRINT_FN_NAME, WASM_STD_READ_FN_NAME}};
 
 pub fn generate_bytecode(program: &Hir, ctx: &mut Context) -> Vec<u8> {
+    ctx.emit_debug("=== BYTECODE GENERATING ===".to_string());
+
     let mut module = WasmModule::new();
 
     let module_bundle = make_module_bundle(&mut module, program);
@@ -24,7 +26,7 @@ pub fn generate_bytecode(program: &Hir, ctx: &mut Context) -> Vec<u8> {
     }
 
     let bytecode = module.finish();
-    ctx.emit_debug(format!("WAT listing:\n{}", print_bytes(&bytecode).unwrap()));
+    ctx.emit_debug(format!("WAT listing\n{}", print_bytes(&bytecode).unwrap()));
 
     bytecode
 }
