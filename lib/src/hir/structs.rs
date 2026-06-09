@@ -103,7 +103,7 @@ pub struct ExprCall {
     pub(crate) rets: Vec<Var>,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Var {
     pub(crate) id: VarId,
     pub(crate) kind: VarKind,
@@ -156,6 +156,10 @@ impl ExprInstr {
         )
     }
 
+    pub(crate) fn phi(ret: Var, args: (Var, Var)) -> ExprInstr {
+        ExprInstr::new(InstrId::new(), InstrKind::Phi, ret, args)
+    }
+
     pub(crate) fn op(kind: InstrKind, ret: Var, args: (Var, Var)) -> ExprInstr {
         ExprInstr::new(InstrId::new(), kind, ret, args)
     }
@@ -174,9 +178,11 @@ pub enum InstrKind {
     LessOrEq,
     Great,
     GreatOrEq,
+
+    Phi,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum VarKind {
     Int,
     Bool,

@@ -111,6 +111,9 @@ impl std::fmt::Display for ExprInstr {
             InstrKind::GreatOrEq => {
                 write!(f, "{} = {} >= {}", ret, lhs, rhs)
             }
+            InstrKind::Phi => {
+                write!(f, "{} = phi({}, {})", ret, lhs, rhs)
+            },
         }
     }
 }
