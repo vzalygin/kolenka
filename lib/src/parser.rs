@@ -1,3 +1,4 @@
+use colored::{ColoredString, Colorize};
 use derived_deref::{Deref, DerefMut};
 use itertools::Itertools;
 use nom::{
@@ -5,8 +6,8 @@ use nom::{
     branch::alt,
     bytes::complete::{tag, take_while, take_while1},
     character::{is_alphanumeric, is_digit},
-    combinator::{all_consuming, map},
-    error::{ParseError, VerboseError, convert_error},
+    combinator::{all_consuming, cut, map},
+    error::{ContextError, ParseError, VerboseError, context, convert_error},
     multi::{many0, many1, separated_list0},
     sequence::{delimited, pair, preceded, terminated},
 };
@@ -56,7 +57,7 @@ pub(crate) struct Program {
 
 impl std::fmt::Display for Program {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "(id{} {})", self.id, self.terms.iter().join(" "))
+        write!(f, "{}{}{} ast \n\t{}{}", "(".magenta(), "prog".green(), self.id.to_string().as_str().green(), self.terms.iter().join("\n\t"), ")".magenta())
     }
 }
 
@@ -113,12 +114,12 @@ impl AstNode {
 impl std::fmt::Display for AstNode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            AstNode::Int { id, value } => write!(f, "(id{} int {})", id, value),
-            AstNode::Bool { id, value } => write!(f, "(id{} bool {})", id, value),
-            AstNode::BuiltinIdentifier { id, value } => write!(f, "(id{} builtin {})", id, value),
-            AstNode::Identifier { id, value } => write!(f, "(id{} ident {})", id, value),
-            AstNode::Quote { id, value } => write!(f, "(id{} quote {}])", id, value),
-            AstNode::Define { id, name: _, value } => write!(f, "(id{} define {})", id, value),
+            AstNode::Int { id, value } => write!(f, "{}{}{} {} {}{}", "(".white(), "node".cyan(), id.to_string().as_str().cyan(), "int".truecolor(255, 170, 0), format!("{}", value).truecolor(150, 255, 250), ")".white()),
+            AstNode::Bool { id, value } => write!(f, "{}{}{} {} {}{}", "(".white(), "node".cyan(), id.to_string().as_str().cyan(), "bool".truecolor(255, 170, 0), format!("{}", value).truecolor(150, 255, 250), ")".white()),
+            AstNode::BuiltinIdentifier { id, value } => write!(f, "{}{}{} {} {}{}", "(".white(), "node".cyan(), id.to_string().as_str().cyan(), "builtin".truecolor(255, 170, 0), value, ")".white()),
+            AstNode::Identifier { id, value } => write!(f, "{}{}{} {} {}{}", "(".white(), "node".cyan(), id.to_string().as_str().cyan(), "ident".truecolor(255, 170, 0), format!("{}", value).truecolor(150, 255, 250), ")".white()),
+            AstNode::Quote { id, value } => write!(f, "{}{}{} {} {}{}", "(".white(), "node".cyan(), id.to_string().as_str().cyan(), "quote".truecolor(255, 170, 0), value, ")".white()),
+            AstNode::Define { id, name: _, value } => write!(f, "{}{}{} {} {}{}", "(".white(), "node".cyan(), id.to_string().as_str().cyan(), "define".truecolor(255, 170, 0), value, ")".white()),
         }
     }
 }
@@ -151,22 +152,22 @@ pub(crate) enum Builtin {
 impl std::fmt::Display for Builtin {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Builtin::Eval => write!(f, "eval"),
-            Builtin::If => write!(f, "if"),
-            Builtin::While => write!(f, "while"),
-            Builtin::Add => write!(f, "add"),
-            Builtin::Sub => write!(f, "sub"),
-            Builtin::Mul => write!(f, "mul"),
-            Builtin::Div => write!(f, "div"),
-            Builtin::Less => write!(f, "<"),
-            Builtin::LessOrEq => write!(f, "<="),
-            Builtin::Great => write!(f, ">"),
-            Builtin::GreatOrEq => write!(f, ">="),
-            Builtin::Pop => write!(f, "pop"),
-            Builtin::Dup => write!(f, "dup"),
-            Builtin::Swap => write!(f, "swap"),
-            Builtin::Quote => write!(f, "quote"),
-            Builtin::Compose => write!(f, "compose"),
+            Builtin::Eval => write!(f, "{}", "eval".truecolor(150, 255, 250)),
+            Builtin::If => write!(f, "{}", "if".truecolor(150, 255, 250)),
+            Builtin::While => write!(f, "{}", "while".truecolor(150, 255, 250)),
+            Builtin::Add => write!(f, "{}", "add".truecolor(150, 255, 250)),
+            Builtin::Sub => write!(f, "{}", "sub".truecolor(150, 255, 250)),
+            Builtin::Mul => write!(f, "{}", "mul".truecolor(150, 255, 250)),
+            Builtin::Div => write!(f, "{}", "div".truecolor(150, 255, 250)),
+            Builtin::Less => write!(f, "{}", "<".truecolor(150, 255, 250)),
+            Builtin::LessOrEq => write!(f, "{}", "<=".truecolor(150, 255, 250)),
+            Builtin::Great => write!(f, "{}", ">".truecolor(150, 255, 250)),
+            Builtin::GreatOrEq => write!(f, "{}", ">=".truecolor(150, 255, 250)),
+            Builtin::Pop => write!(f, "{}", "pop".truecolor(150, 255, 250)),
+            Builtin::Dup => write!(f, "{}", "dup".truecolor(150, 255, 250)),
+            Builtin::Swap => write!(f, "{}", "swap".truecolor(150, 255, 250)),
+            Builtin::Quote => write!(f, "{}", "quote".truecolor(150, 255, 250)),
+            Builtin::Compose => write!(f, "{}", "compose".truecolor(150, 255, 250)),
         }
     }
 }
@@ -174,7 +175,7 @@ impl std::fmt::Display for Builtin {
 pub fn parse_source(input: &str, ctx: &mut Context) -> Result<Ast, CompilerError> {
     ctx.emit_debug("=== AST PARSING ===".to_string());
 
-    match program::<VerboseError<&str>>(input).finish() {
+    match program(input).finish() {
         Ok((_, ast)) => {
             ctx.emit_debug(format!("parsed {}", ast.program));
             Ok(ast)
@@ -188,7 +189,7 @@ pub fn parse_source(input: &str, ctx: &mut Context) -> Result<Ast, CompilerError
     }
 }
 
-fn program<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, Ast, E> {
+fn program<'a, E: ContextError<&'a str> + ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, Ast, E> {
     map(
         all_consuming(delimited(multispace0, terms, multispace0)),
         |terms| Ast {
@@ -200,17 +201,21 @@ fn program<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, Ast, 
     )(input)
 }
 
-fn terms<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, Vec<AstNode>, E> {
+fn terms<'a, E: ContextError<&'a str> + ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, Vec<AstNode>, E> {
     separated_list0(multispace1, term)(input)
 }
 
-fn term<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, AstNode, E> {
+fn term<'a, E: ContextError<&'a str> + ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, AstNode, E> {
     alt((define, quotation, num, bool, builtin, identifier))(input)
 }
 
-fn quotation<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, AstNode, E> {
+fn quotation<'a, E: ContextError<&'a str> + ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, AstNode, E> {
     map(
-        delimited(tag("[").and(multispace0), terms, multispace0.and(tag("]"))),
+         delimited(
+            tag("[").and(multispace0),
+            terms,
+            multispace0.and(cut(context("EXPECTED CLOSING PARENTHESIS ], BUT FOUND", tag("]"))))
+        ),
         |inner| AstNode::Quote {
             id: NodeId::new(),
             value: Program {
@@ -221,7 +226,7 @@ fn quotation<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, Ast
     )(input)
 }
 
-fn define<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, AstNode, E> {
+fn define<'a, E: ContextError<&'a str> + ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, AstNode, E> {
     map(
         preceded(
             tag("define").and(multispace1),
@@ -241,21 +246,21 @@ fn define<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, AstNod
     )(input)
 }
 
-fn identifier<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, AstNode, E> {
+fn identifier<'a, E: ContextError<&'a str> + ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, AstNode, E> {
     map(string, |id: String| AstNode::Identifier {
         id: NodeId::new(),
         value: id,
     })(input)
 }
 
-fn string<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, String, E> {
+fn string<'a, E: ContextError<&'a str> + ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, String, E> {
     map(
         take_while1(|c| is_alphanumeric(c as u8) || c == '_'),
         |s: &str| s.to_string(),
     )(input)
 }
 
-fn num<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, AstNode, E> {
+fn num<'a, E: ContextError<&'a str> + ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, AstNode, E> {
     map(take_while1(|c: char| is_digit(c as u8)), |number: &str| {
         let number = number.parse::<i32>().unwrap();
         AstNode::Int {
@@ -265,7 +270,7 @@ fn num<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, AstNode, 
     })(input)
 }
 
-fn bool<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, AstNode, E> {
+fn bool<'a, E: ContextError<&'a str> + ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, AstNode, E> {
     alt((
         map(tag("true"), |_| AstNode::Bool {
             id: NodeId::new(),
@@ -278,7 +283,7 @@ fn bool<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, AstNode,
     ))(input)
 }
 
-fn builtin<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, AstNode, E> {
+fn builtin<'a, E: ContextError<&'a str> + ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, AstNode, E> {
     map(
         alt((
             map(tag("eval"), |_| Builtin::Eval),
@@ -305,20 +310,20 @@ fn builtin<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, AstNo
     )(input)
 }
 
-fn multispace0<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, Vec<&'a str>, E> {
+fn multispace0<'a, E: ContextError<&'a str> + ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, Vec<&'a str>, E> {
     many0(alt((
         nom::character::complete::multispace1::<&'a str, E>,
         comment,
     )))(input)
 }
 
-fn multispace1<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, Vec<&'a str>, E> {
+fn multispace1<'a, E: ContextError<&'a str> + ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, Vec<&'a str>, E> {
     many1(alt((
         nom::character::complete::multispace1::<&'a str, E>,
         comment,
     )))(input)
 }
 
-fn comment<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, &'a str, E> {
+fn comment<'a, E: ContextError<&'a str> + ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, &'a str, E> {
     map(preceded(tag("#"), take_while(|c| c != '\n')), |comm| comm)(input)
 }
