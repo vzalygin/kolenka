@@ -1,3 +1,4 @@
+use colored::Colorize;
 use itertools::Itertools;
 
 use crate::hir::{
@@ -24,7 +25,7 @@ impl<'a> std::fmt::Display for DefMap<'a> {
             "{{{}}}",
             self.0
                 .iter()
-                .map(|(k, v)| format!("{}: {}", k, v))
+                .map(|(k, v)| format!("{}", k))
                 .join(", ")
         )
     }
@@ -61,10 +62,10 @@ impl std::fmt::Display for HirFunction {
         } else {
             &"anon".to_string()
         };
-        writeln!(f, "fn{}[{}]({}):", *self.id, name, args)?;
+        writeln!(f, "{} {}[{}]({}):", "fn".truecolor(255, 170, 0), format!("{}", *self.id).green(), name.as_str().green(), args)?;
 
         for block in self.iter() {
-            write!(f, "{}:", block.id)?;
+            write!(f, "{}{}", format!("{}", block.id).truecolor(250, 250, 250), ":".truecolor(250, 250, 250))?;
             for expr in block.iter() {
                 write!(f, "\t")?;
                 expr.fmt_inner(f, &returns)?;
@@ -82,37 +83,37 @@ impl std::fmt::Display for ExprInstr {
         let (lhs, rhs) = self.consumes;
         match self.kind {
             InstrKind::ConstInt(i) => {
-                write!(f, "{} = {}", ret, i)
+                write!(f, "{} {} {}", format!("{}", ret).truecolor(240, 240, 240), "=", format!("{}", i).truecolor(150, 255, 250))
             }
             InstrKind::ConstBool(b) => {
-                write!(f, "{} = {}", ret, b)
+                write!(f, "{} {} {}", format!("{}", ret).truecolor(240, 240, 240), "=", format!("{}", b).truecolor(210, 255, 250))
             }
             InstrKind::Add => {
-                write!(f, "{} = {} + {}", ret, lhs, rhs)
+                write!(f, "{} {} {} + {}", format!("{}", ret).truecolor(240, 240, 240), "=", lhs, rhs)
             }
             InstrKind::Sub => {
-                write!(f, "{} = {} - {}", ret, lhs, rhs)
+                write!(f, "{} {} {} - {}", format!("{}", ret).truecolor(240, 240, 240), "=", lhs, rhs)
             }
             InstrKind::Mul => {
-                write!(f, "{} = {} * {}", ret, lhs, rhs)
+                write!(f, "{} {} {} * {}", format!("{}", ret).truecolor(240, 240, 240), "=", lhs, rhs)
             }
             InstrKind::Div => {
-                write!(f, "{} = {} / {}", ret, lhs, rhs)
+                write!(f, "{} {} {} / {}", format!("{}", ret).truecolor(240, 240, 240), "=", lhs, rhs)
             }
             InstrKind::Less => {
-                write!(f, "{} = {} < {}", ret, lhs, rhs)
+                write!(f, "{} {} {} < {}", format!("{}", ret).truecolor(240, 240, 240), "=", lhs, rhs)
             }
             InstrKind::LessOrEq => {
-                write!(f, "{} = {} <= {}", ret, lhs, rhs)
+                write!(f, "{} {} {} <= {}", format!("{}", ret).truecolor(240, 240, 240), "=", lhs, rhs)
             }
             InstrKind::Great => {
-                write!(f, "{} = {} > {}", ret, lhs, rhs)
+                write!(f, "{} {} {} > {}", format!("{}", ret).truecolor(240, 240, 240), "=", lhs, rhs)
             }
             InstrKind::GreatOrEq => {
-                write!(f, "{} = {} >= {}", ret, lhs, rhs)
+                write!(f, "{} {} {} >= {}", format!("{}", ret).truecolor(240, 240, 240), "=", lhs, rhs)
             }
             InstrKind::Phi => {
-                write!(f, "{} = phi({}, {})", ret, lhs, rhs)
+                write!(f, "{} {} {}({}, {})", format!("{}", ret).truecolor(240, 240, 240), "=", "phi".green(), format!("{}", lhs).truecolor(240, 240, 240), format!("{}", rhs).truecolor(240, 240, 240))
             },
         }
     }
@@ -122,16 +123,16 @@ impl std::fmt::Display for Var {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self.kind {
             VarKind::Int => {
-                write!(f, "i{}", *self.id)
+                write!(f, "{}", format!("i{}", *self.id).truecolor(240, 240, 240))
             }
             VarKind::Bool => {
-                write!(f, "b{}", *self.id)
+                write!(f, "{}", format!("b{}", *self.id).truecolor(240, 240, 240))
             }
             VarKind::Any => {
-                write!(f, "a{}", *self.id)
+                write!(f, "{}", format!("a{}", *self.id).truecolor(240, 240, 240))
             }
             VarKind::AnonFn(program_id) => {
-                write!(f, "fn{}", *program_id)
+                write!(f, "{}", format!("fn{}", program_id).truecolor(240, 240, 240))
             }
             VarKind::Nothing => {
                 write!(f, "NOTHING{}", *self.id)
@@ -178,13 +179,13 @@ impl Expr {
     ) -> std::fmt::Result {
         match self {
             Expr::Goto(ExprGoto { next }) => {
-                write!(f, "goto {};", next)
+                write!(f, "{} {};", "goto".truecolor(255, 170, 0), format!("{}", next).truecolor(250, 250, 250))
             }
             Expr::GotoIf(ExprGotoIf { cond, then_block, else_block }) => {
                 write!(
                     f,
-                    "if {} then goto {}; else goto {};",
-                    cond, then_block, *else_block
+                    "{} {} {} {}; {} {};",
+                    "if".truecolor(255, 170, 0), cond, "then goto".truecolor(255, 170, 0), format!("{}", then_block).truecolor(250, 250, 250), "else goto".truecolor(255, 170, 0), format!("{}", *else_block).truecolor(250, 250, 250)
                 )
             }
             Expr::Instr(instr) => {
@@ -194,16 +195,16 @@ impl Expr {
                 let args = consumes.iter().map(|var| format!("{}", var)).join(", ");
                 let rets = produces.iter().map(|var| format!("{}", var)).join(", ");
                 if rets.is_empty() {
-                    write!(f, "call fn{}({});", prog_id, args)
+                    write!(f, "{} {}({});", "call fn".truecolor(255, 170, 0), format!("{}", prog_id).green(), args.truecolor(240, 240, 240))
                 } else {
-                    write!(f, "{} = call fn{}({});", rets, prog_id, args)
+                    write!(f, "{} {} {} {}({});", rets.truecolor(240, 240, 240), "=", "call fn".truecolor(255, 170, 0), format!("{}", prog_id).green(), args.truecolor(240, 240, 240))
                 }
             }
             Expr::Return => {
                 if !returns.is_empty() {
-                    write!(f, "return {};", returns)
+                    write!(f, "{} {};", "return".truecolor(255, 170, 0), returns)
                 } else {
-                    write!(f, "return;")
+                    write!(f, "{};", "return".truecolor(255, 170, 0))
                 }
             }
         }
