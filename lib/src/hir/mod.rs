@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use crate::{
     Ast, CompilerError, Context, ProgramId, hir::{
         controlflow::construct_hir,
-        dataflow::analyze_dataflow
+        dataflow::analyze_dataflow, ssa::ssaify
     }, parser::AstNode, prelude::{MAIN_FN_NAME, STD_PRINT_FN_NAME, STD_READ_FN_NAME}, typing::infer_definitions
 };
 
@@ -17,6 +17,7 @@ mod controlflow;
 mod dataflow;
 mod fmt;
 mod structs;
+mod ssa;
 
 pub(crate) use crate::hir::{structs::{DeclMap, DefMap, Hir, Var, VarKind, HirFunction, HirBaseBlock, Expr, ExprInstr, ExprGoto, ExprGotoIf, ExprCall, InstrKind}, dataflow::{Signature, DataFlow}};
 
@@ -79,7 +80,10 @@ pub fn build_hir(
     let dataflow = analyze_dataflow(&decls, &defs, &types, hir_ctx);
     let hir = construct_hir(&decls, &defs, &dataflow, hir_ctx);
     hir_ctx.emit_debug(format!("HIR listing\n{}", hir));
+    hir_ctx.emit_debug("=== SSA BUILDING ===".to_string());
     validate_main(&hir, &decls)?;
+    let ssa = ssaify(&hir, hir_ctx);
+    hir_ctx.emit_debug(format!("SSA listing\n{}", ssa));
     Ok(hir)
 }
 

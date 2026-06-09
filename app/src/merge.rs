@@ -5,7 +5,7 @@ use std::{
 use lib::Context;
 use tempfile::TempDir;
 
-use crate::std_wasm::{KOLENKA_STD_WASM, WASM_MERGE_EXECUTABLE};
+use crate::std_wasm::{KOLENKA_STD_WASM_BYTES, WASM_MERGE_EXECUTABLE_BYTES};
 
 const STD_MODULE_NAME: &str = "kolenka_std";
 const USER_MODULE_NAME: &str = "main";
@@ -53,7 +53,7 @@ impl Error for MergeError {
 }
 
 pub fn merge_with_std(user_wasm: &[u8], ctx: &mut Context) -> Result<Vec<u8>, MergeError> {
-    merge_modules(user_wasm, KOLENKA_STD_WASM, ctx)
+    merge_modules(user_wasm, KOLENKA_STD_WASM_BYTES, ctx)
 }
 
 fn merge_modules(user_wasm: &[u8], std_wasm: &[u8], ctx: &mut Context) -> Result<Vec<u8>, MergeError> {
@@ -71,7 +71,7 @@ fn merge_modules(user_wasm: &[u8], std_wasm: &[u8], ctx: &mut Context) -> Result
 
     let wasm_exe_path = temp_dir.path().join(WASM_MERGE_EXECUTABLE_NAME);
 
-    fs::write(&wasm_exe_path, WASM_MERGE_EXECUTABLE).map_err(|source| MergeError::Io {
+    fs::write(&wasm_exe_path, WASM_MERGE_EXECUTABLE_BYTES).map_err(|source| MergeError::Io {
         path: std::env::temp_dir(),
         source,
     })?;

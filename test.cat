@@ -1,3 +1,6 @@
-define foo { 1 }
-
-foo print
+read
+dup 0 >
+[ ]
+[ 0 swap - ]
+if
+print

@@ -235,6 +235,7 @@ fn generate_block<'a>(
                             .i32_ge_s()
                             .local_set(*res);
                     },
+                    InstrKind::Phi => unimplemented!("phi is not supported"),
                 }
             },
             Expr::Call(ExprCall { prog_id: prog, args, rets } ) => {
